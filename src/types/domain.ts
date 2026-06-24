@@ -43,9 +43,7 @@ export interface ScoringProfile {
   baselineScore: number; // ej. 80, como en SCA / Coffee Rose
   intensityScale: { min: number; max: number };
   formula: 'weighted_sum' | 'weighted_avg' | 'custom';
-  // Pesos específicos por atributo para ESTE perfil (sobreescribe defaultWeight si existe)
   attributeWeights?: Record<string, number>;
-  // Solo si formula === 'custom': nombre de función registrada en src/scoring/customFormulas.ts
   customFormulaRef?: string;
   createdAt: number;
 }
@@ -75,8 +73,8 @@ export interface TastingSession {
   masterId: string;
   scoringProfileId: string;
   status: SessionStatus;
-  joinCode: string; // código de 6 dígitos para unirse, estilo Kahoot (ej. "482917")
-  isBlind: boolean; // si true, los tasters no ven el nombre real del café
+  joinCode: string;
+  isBlind: boolean;
   createdAt: number;
   closedAt?: number;
 }
@@ -89,21 +87,19 @@ export interface SessionParticipant {
 }
 
 /**
- * Un café dentro de una sesión (una muestra a catar).
+ * Un café dentro de una sesión.
  */
 export interface SessionCoffee {
   id: string;
   sessionId: string;
   name: string;
-  tableLabel: string; // código auto-generado o manual, útil para blind cupping
+  tableLabel: string;
   order: number;
   createdAt: number;
 }
 
 /**
  * El puntaje de UN catador para UN café dentro de una sesión.
- * Importante: es un único documento que se SOBREESCRIBE en cada cambio,
- * no se acumula historial — así el modelo es simple y barato en Firestore.
  */
 export interface TasterScore {
   userId: string;
@@ -112,20 +108,42 @@ export interface TasterScore {
   coffeeId: string;
   descriptors: DescriptorSelection[];
   notes?: string;
-  computedScore: number; // recalculado en cliente cada vez que cambian los descriptors
+  computedScore: number;
   updatedAt: number;
 }
 
 /**
- * Resultado agregado que ve el Master en el dashboard: promedio entre catadores,
- * descriptores más mencionados, etc. Se calcula en cliente a partir de TasterScore[],
- * no se persiste (se deriva).
+ * Resultado agregado que ve el Master en el dashboard.
  */
 export interface AggregatedCoffeeResult {
   coffeeId: string;
   coffeeName: string;
   tableLabel: string;
+
   averageScore: number;
-  scoreByTaster: { userId: string; displayName: string; score: number }[];
-  topDescriptors: { attributeId: string; name: string; count: number; avgIntensity: number }[];
+
+  scoreByTaster: {
+    userId: string;
+    displayName: string;
+    score: number;
+  }[];
+
+  topDescriptors: {
+    attributeId: string;
+    name: string;
+    count: number;
+    avgIntensity: number;
+  }[];
+
+  descriptorConsensus: {
+    attributeId: string;
+    name: string;
+    percentage: number;
+  }[];
+
+  categorySummary: {
+    categoryId: string;
+    name: string;
+    count: number;
+  }[];
 }

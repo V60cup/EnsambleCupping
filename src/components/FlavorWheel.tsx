@@ -17,6 +17,7 @@ import Svg, {
 } from 'react-native-svg';
 
 import { FlavorAttribute } from '../types/domain';
+import { useTheme } from '../theme/ThemeProvider';
 
 interface FlavorWheelProps {
   attributes: FlavorAttribute[];
@@ -33,29 +34,21 @@ interface Segment {
 }
 
 const ROOT_COLORS = [
-  '#8E5A9F',
-  '#56438F',
-  '#E16050',
-  '#5B3A2E',
-  '#D08A45',
-  '#6B3E25',
-  '#8A7A68',
-  '#9C6654',
-  '#808080',
-  '#B66B2A',
-  '#C7A36A',
-  '#4E8A5A',
-  '#3E7154',
+  '#A58E76',
+  '#B39A82',
+  '#C4AA8C',
+  '#9B8470',
+  '#7F6E61',
+  '#8E7A6A',
+  '#6E6258',
+  '#B7AA9C',
+  '#8A8076',
+  '#A9957B',
 ];
 
-const WHEEL_SIZE_LIMIT = 620;
+const WHEEL_SIZE_LIMIT = 580;
 
-function polarToCartesian(
-  cx: number,
-  cy: number,
-  radius: number,
-  angle: number
-) {
+function polarToCartesian(cx: number, cy: number, radius: number, angle: number) {
   const angleInRadians = ((angle - 90) * Math.PI) / 180;
 
   return {
@@ -109,18 +102,17 @@ export function FlavorWheel({
   selectedIntensities,
   onChangeIntensity,
 }: FlavorWheelProps) {
+  const { theme } = useTheme();
   const { width } = useWindowDimensions();
 
   const [currentParentId, setCurrentParentId] = useState<string | null>(null);
-  const [activeAttributeId, setActiveAttributeId] = useState<string | null>(
-    null
-  );
+  const [activeAttributeId, setActiveAttributeId] = useState<string | null>(null);
 
   const size = Math.min(width - 28, WHEEL_SIZE_LIMIT);
   const cx = size / 2;
   const cy = size / 2;
 
-  const innerRadius = size * 0.22;
+  const innerRadius = size * 0.23;
   const outerRadius = size * 0.46;
 
   const attributesById = useMemo(() => {
@@ -243,35 +235,58 @@ export function FlavorWheel({
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>CoffeeMind Aroma Wheel</Text>
-
-      <Text style={styles.subtitle}>
-        Selecciona una categoría y avanza por sus descriptores relacionados
-      </Text>
-
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: theme.colors.surface,
+          borderColor: theme.colors.border,
+        },
+      ]}
+    >
       <View style={styles.breadcrumbRow}>
-        <Pressable style={styles.breadcrumbChip} onPress={goToRoot}>
-          <Text style={styles.breadcrumbText}>Inicio</Text>
+        <Pressable
+          style={[
+            styles.breadcrumbChip,
+            {
+              backgroundColor: theme.colors.surfaceAlt,
+              borderColor: theme.colors.border,
+            },
+          ]}
+          onPress={goToRoot}
+        >
+          <Text style={[styles.breadcrumbText, { color: theme.colors.text }]}>
+            Inicio
+          </Text>
         </Pressable>
 
         {breadcrumb.map((item) => (
           <Pressable
             key={item.id}
-            style={styles.breadcrumbChip}
+            style={[
+              styles.breadcrumbChip,
+              {
+                backgroundColor: theme.colors.surfaceAlt,
+                borderColor: theme.colors.border,
+              },
+            ]}
             onPress={() => {
               setCurrentParentId(item.id);
               setActiveAttributeId(null);
             }}
           >
-            <Text style={styles.breadcrumbText}>{item.name}</Text>
+            <Text style={[styles.breadcrumbText, { color: theme.colors.text }]}>
+              {item.name}
+            </Text>
           </Pressable>
         ))}
       </View>
 
       {currentParent && (
         <Pressable style={styles.backButton} onPress={goBack}>
-          <Text style={styles.backButtonText}>← Volver</Text>
+          <Text style={[styles.backButtonText, { color: theme.colors.textMuted }]}>
+            Volver
+          </Text>
         </Pressable>
       )}
 
@@ -280,6 +295,7 @@ export function FlavorWheel({
           <G>
             {segments.map((segment) => {
               const selected = (selectedIntensities[segment.attr.id] ?? 0) > 0;
+              const active = activeAttributeId === segment.attr.id;
 
               const textPosition = getTextPosition(
                 cx,
@@ -296,6 +312,9 @@ export function FlavorWheel({
                   ? midAngle + 90
                   : midAngle - 90;
 
+              const fill = selected ? theme.colors.accent : segment.color;
+              const opacity = selected || active ? 1 : segment.hasChildren ? 0.82 : 0.68;
+
               return (
                 <G key={segment.attr.id}>
                   <Path
@@ -307,23 +326,32 @@ export function FlavorWheel({
                       segment.startAngle,
                       segment.endAngle
                     )}
-                    fill={segment.color}
-                    opacity={selected ? 1 : segment.hasChildren ? 0.9 : 0.72}
-                    stroke="#FFFFFF"
-                    strokeWidth={2}
+                    fill={fill}
+                    opacity={opacity}
+                    stroke={selected || active ? theme.colors.white : theme.colors.background}
+                    strokeWidth={selected || active ? 5 : 2}
+                    onPress={() => handleSegmentPress(segment)}
+                  />
+
+                  <Circle
+                    cx={textPosition.x}
+                    cy={textPosition.y}
+                    r={26}
+                    fill="transparent"
                     onPress={() => handleSegmentPress(segment)}
                   />
 
                   <SvgText
                     x={textPosition.x}
                     y={textPosition.y}
-                    fill="#FFFFFF"
+                    fill={theme.colors.white}
                     fontSize={segments.length > 10 ? 10 : 13}
                     fontWeight="800"
                     textAnchor="middle"
                     alignmentBaseline="middle"
                     rotation={rotation}
                     origin={`${textPosition.x}, ${textPosition.y}`}
+                    onPress={() => handleSegmentPress(segment)}
                   >
                     {truncateLabel(segment.attr.name, segments.length > 10 ? 11 : 16)}
                   </SvgText>
@@ -335,97 +363,123 @@ export function FlavorWheel({
               cx={cx}
               cy={cy}
               r={innerRadius - 8}
-              fill="#FAF7F2"
-              stroke="#FFFFFF"
+              fill={theme.colors.surface}
+              stroke={theme.colors.background}
               strokeWidth={4}
             />
 
             <SvgText
               x={cx}
-              y={cy - 16}
+              y={cy - 8}
               textAnchor="middle"
-              fill="#3D2B1F"
+              fill={theme.colors.text}
               fontSize={18}
-              fontWeight="800"
+              fontWeight="900"
             >
-              {currentParent ? truncateLabel(currentParent.name, 12) : 'Coffee'}
+              {currentParent ? truncateLabel(currentParent.name, 13) : 'Descriptores'}
             </SvgText>
 
             <SvgText
               x={cx}
-              y={cy + 10}
+              y={cy + 18}
               textAnchor="middle"
-              fill="#6F4E37"
-              fontSize={14}
-              fontWeight="800"
-            >
-              {currentParent ? 'Selecciona' : 'Mind'}
-            </SvgText>
-
-            <SvgText
-              x={cx}
-              y={cy + 32}
-              textAnchor="middle"
-              fill="#7A6A5C"
-              fontSize={10}
+              fill={theme.colors.textMuted}
+              fontSize={11}
               fontWeight="700"
             >
-              {currentParent ? 'relacionados' : 'Aroma Wheel'}
+              {currentParent ? 'Selecciona' : 'Sensorial'}
             </SvgText>
           </G>
         </Svg>
       </View>
 
       {activeAttribute ? (
-        <View style={styles.selectedPanel}>
-          <Text style={styles.selectedLabel}>Descriptor seleccionado</Text>
+        <View
+          style={[
+            styles.selectedPanel,
+            {
+              backgroundColor: theme.colors.surfaceAlt,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.selectedLabel, { color: theme.colors.textMuted }]}>
+            Descriptor
+          </Text>
 
-          <Text style={styles.selectedName}>{activeAttribute.name}</Text>
+          <Text style={[styles.selectedName, { color: theme.colors.text }]}>
+            {activeAttribute.name}
+          </Text>
 
           <View style={styles.intensityRow}>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
-              <Pressable
-                key={level}
-                style={[
-                  styles.intensityDot,
-                  level <= activeIntensity && styles.intensityDotActive,
-                ]}
-                onPress={() => onChangeIntensity(activeAttribute.id, level)}
-              >
-                <Text
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => {
+              const enabled = level <= activeIntensity;
+
+              return (
+                <Pressable
+                  key={level}
                   style={[
-                    styles.intensityText,
-                    level <= activeIntensity && styles.intensityTextActive,
+                    styles.intensityDot,
+                    {
+                      backgroundColor: enabled
+                        ? theme.colors.accent
+                        : theme.colors.surface,
+                      borderColor: enabled
+                        ? theme.colors.accent
+                        : theme.colors.border,
+                    },
                   ]}
+                  onPress={() => onChangeIntensity(activeAttribute.id, level)}
                 >
-                  {level}
-                </Text>
-              </Pressable>
-            ))}
+                  <Text
+                    style={[
+                      styles.intensityText,
+                      {
+                        color: enabled ? theme.colors.white : theme.colors.textMuted,
+                      },
+                    ]}
+                  >
+                    {level}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
 
           <Pressable
             style={styles.clearButton}
             onPress={() => onChangeIntensity(activeAttribute.id, 0)}
           >
-            <Text style={styles.clearButtonText}>Quitar descriptor</Text>
+            <Text style={[styles.clearButtonText, { color: theme.colors.danger }]}>
+              Quitar
+            </Text>
           </Pressable>
         </View>
       ) : (
-        <View style={styles.selectedPanel}>
-          <Text style={styles.selectedLabel}>
+        <View
+          style={[
+            styles.selectedPanel,
+            {
+              backgroundColor: theme.colors.surfaceAlt,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.selectedLabel, { color: theme.colors.textMuted }]}>
             {currentItems.length > 0
-              ? 'Toca una sección para avanzar o seleccionar'
-              : 'No hay descriptores relacionados'}
+              ? 'Toca una sección'
+              : 'Sin descriptores relacionados'}
           </Text>
         </View>
       )}
 
       <View style={styles.selectedList}>
-        <Text style={styles.selectedListTitle}>Descriptores activos</Text>
+        <Text style={[styles.selectedListTitle, { color: theme.colors.text }]}>
+          Seleccionados
+        </Text>
 
         {selectedAttributes.length === 0 ? (
-          <Text style={styles.emptySelection}>
+          <Text style={[styles.emptySelection, { color: theme.colors.textMuted }]}>
             Aún no has seleccionado descriptores.
           </Text>
         ) : (
@@ -433,13 +487,35 @@ export function FlavorWheel({
             {selectedAttributes.map((attr) => (
               <Pressable
                 key={attr.id}
-                style={styles.selectedChip}
+                style={[
+                  styles.selectedChip,
+                  {
+                    backgroundColor:
+                      activeAttributeId === attr.id
+                        ? theme.colors.accent
+                        : theme.colors.surfaceAlt,
+                    borderColor:
+                      activeAttributeId === attr.id
+                        ? theme.colors.accent
+                        : theme.colors.border,
+                  },
+                ]}
                 onPress={() => {
                   setActiveAttributeId(attr.id);
                   setCurrentParentId(attr.parentId);
                 }}
               >
-                <Text style={styles.selectedChipText}>
+                <Text
+                  style={[
+                    styles.selectedChipText,
+                    {
+                      color:
+                        activeAttributeId === attr.id
+                          ? theme.colors.white
+                          : theme.colors.text,
+                    },
+                  ]}
+                >
                   {attr.name} · {selectedIntensities[attr.id]}
                 </Text>
               </Pressable>
@@ -453,27 +529,10 @@ export function FlavorWheel({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 22,
+    borderRadius: 24,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#EEE6DA',
     marginBottom: 18,
-  },
-
-  title: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#3D2B1F',
-    textAlign: 'center',
-  },
-
-  subtitle: {
-    fontSize: 12,
-    color: '#7A6A5C',
-    textAlign: 'center',
-    marginTop: 2,
-    marginBottom: 10,
   },
 
   breadcrumbRow: {
@@ -485,14 +544,13 @@ const styles = StyleSheet.create({
   },
 
   breadcrumbChip: {
-    backgroundColor: '#EFE7DA',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
+    borderWidth: 1,
   },
 
   breadcrumbText: {
-    color: '#3D2B1F',
     fontSize: 11,
     fontWeight: '800',
   },
@@ -503,7 +561,6 @@ const styles = StyleSheet.create({
   },
 
   backButtonText: {
-    color: '#6F4E37',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -514,25 +571,21 @@ const styles = StyleSheet.create({
   },
 
   selectedPanel: {
-    backgroundColor: '#FAF7F2',
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 12,
     marginTop: 10,
     borderWidth: 1,
-    borderColor: '#EEE6DA',
   },
 
   selectedLabel: {
     fontSize: 12,
-    color: '#7A6A5C',
-    fontWeight: '700',
+    fontWeight: '800',
     textTransform: 'uppercase',
   },
 
   selectedName: {
     fontSize: 20,
-    fontWeight: '800',
-    color: '#3D2B1F',
+    fontWeight: '900',
     marginTop: 2,
     marginBottom: 10,
   },
@@ -544,26 +597,17 @@ const styles = StyleSheet.create({
   },
 
   intensityDot: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#EFE7DA',
+    width: 31,
+    height: 31,
+    borderRadius: 16,
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
 
-  intensityDotActive: {
-    backgroundColor: '#6F4E37',
-  },
-
   intensityText: {
-    color: '#3D2B1F',
     fontSize: 11,
-    fontWeight: '700',
-  },
-
-  intensityTextActive: {
-    color: '#FFFFFF',
+    fontWeight: '800',
   },
 
   clearButton: {
@@ -572,9 +616,8 @@ const styles = StyleSheet.create({
   },
 
   clearButtonText: {
-    color: '#B3261E',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
   },
 
   selectedList: {
@@ -583,8 +626,7 @@ const styles = StyleSheet.create({
 
   selectedListTitle: {
     fontSize: 13,
-    fontWeight: '800',
-    color: '#3D2B1F',
+    fontWeight: '900',
     marginBottom: 8,
   },
 
@@ -595,21 +637,18 @@ const styles = StyleSheet.create({
   },
 
   selectedChip: {
-    backgroundColor: '#6F4E37',
     paddingHorizontal: 10,
     paddingVertical: 7,
-    borderRadius: 16,
-    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
   },
 
   selectedChipText: {
-    color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
   },
 
   emptySelection: {
     fontSize: 12,
-    color: '#7A6A5C',
   },
 });

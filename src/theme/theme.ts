@@ -6,23 +6,22 @@ export const lightTheme = {
   mode: 'light' as ThemeMode,
 
   colors: {
-    background: '#FAF7F2',
+    background: '#F4F1EC',
     surface: '#FFFFFF',
-    surfaceAlt: '#F2E9DD',
+    surfaceAlt: '#E8E2DA',
 
-    primary: '#3D2B1F',
-    primarySoft: '#6F4E37',
-    accent: '#C47A3A',
+    primary: '#2F2A26',
+    primarySoft: '#7A6F66',
+    accent: '#A58E76',
 
-    text: '#2A1A12',
-    textMuted: '#7A6A5C',
+    text: '#26221F',
+    textMuted: '#746B63',
 
-    border: '#EEE6DA',
+    border: '#D8D0C7',
 
-    danger: '#B3261E',
-
-    success: '#2E7D32',
-    warning: '#F9A825',
+    danger: '#A14A3F',
+    success: '#63735E',
+    warning: '#B08A4A',
 
     white: '#FFFFFF',
     black: '#000000',
@@ -33,23 +32,22 @@ export const darkTheme = {
   mode: 'dark' as ThemeMode,
 
   colors: {
-    background: '#16100C',
-    surface: '#211813',
-    surfaceAlt: '#2C211A',
+    background: '#171513',
+    surface: '#24211E',
+    surfaceAlt: '#302C28',
 
-    primary: '#F4D7B5',
-    primarySoft: '#C99B6A',
-    accent: '#D68A45',
+    primary: '#EFE8DF',
+    primarySoft: '#B7AA9C',
+    accent: '#C4AA8C',
 
-    text: '#FFF7EF',
-    textMuted: '#BCA99A',
+    text: '#F7F1EA',
+    textMuted: '#B8AEA4',
 
-    border: '#3B2A21',
+    border: '#403A35',
 
-    danger: '#FF8A80',
-
-    success: '#66BB6A',
-    warning: '#FFCA28',
+    danger: '#E38D82',
+    success: '#A1B596',
+    warning: '#D1AD68',
 
     white: '#FFFFFF',
     black: '#000000',

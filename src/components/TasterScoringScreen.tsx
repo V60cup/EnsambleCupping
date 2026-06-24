@@ -37,6 +37,8 @@ export function TasterScoringScreen({
   const [coffees, setCoffees] = useState<SessionCoffee[]>([]);
   const [selectedCoffeeId, setSelectedCoffeeId] = useState<string | null>(null);
   const [attributes, setAttributes] = useState<FlavorAttribute[]>([]);
+  const [isLoadingAttributes, setIsLoadingAttributes] = useState(true);
+  const [attributesError, setAttributesError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -61,7 +63,38 @@ export function TasterScoringScreen({
   }, [sessionId]);
 
   useEffect(() => {
-    getFlavorAttributesForOrg(null).then(setAttributes).catch(console.error);
+    let mounted = true;
+
+    async function loadAttributes() {
+      try {
+        setIsLoadingAttributes(true);
+        setAttributesError(null);
+
+        const list = await getFlavorAttributesForOrg(null);
+
+        if (mounted) {
+          setAttributes(list);
+        }
+      } catch (error) {
+        console.error(error);
+
+        if (mounted) {
+          setAttributesError(
+            'No se pudieron cargar los descriptores de sabor.'
+          );
+        }
+      } finally {
+        if (mounted) {
+          setIsLoadingAttributes(false);
+        }
+      }
+    }
+
+    loadAttributes();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const attributesById = useMemo(
@@ -124,6 +157,8 @@ export function TasterScoringScreen({
         displayName={displayName}
         attributes={attributes}
         attributesById={attributesById}
+        isLoadingAttributes={isLoadingAttributes}
+        attributesError={attributesError}
       />
     </View>
   );
@@ -136,6 +171,8 @@ interface CoffeeScoringPanelProps {
   displayName: string;
   attributes: FlavorAttribute[];
   attributesById: Record<string, FlavorAttribute>;
+  isLoadingAttributes: boolean;
+  attributesError: string | null;
 }
 
 function CoffeeScoringPanel({
@@ -145,6 +182,8 @@ function CoffeeScoringPanel({
   displayName,
   attributes,
   attributesById,
+  isLoadingAttributes,
+  attributesError,
 }: CoffeeScoringPanelProps) {
   const { selections, liveScore, notes, setNotes, toggleDescriptor } =
     useTasterScoring({
@@ -163,6 +202,9 @@ function CoffeeScoringPanel({
     }, {} as Record<string, number>);
   }, [selections]);
 
+  const hasSelectedDescriptors = selections.length > 0;
+  const showDescriptorWarning = !isLoadingAttributes && !hasSelectedDescriptors;
+
   return (
     <ScrollView
       style={styles.scoringContainer}
@@ -173,14 +215,44 @@ function CoffeeScoringPanel({
 
         <Text style={styles.coffeeName}>{coffee.name}</Text>
 
-        <Text style={styles.liveScore}>Score en vivo: {liveScore.toFixed(2)}</Text>
+        <Text style={styles.liveScore}>
+          Score en vivo: {liveScore.toFixed(2)}
+        </Text>
+
+        <Text style={styles.helperText}>
+          Selecciona descriptores de la rueda para construir el perfil sensorial
+          del café.
+        </Text>
       </View>
 
-      <FlavorWheel
-        attributes={attributes}
-        selectedIntensities={selectedIntensities}
-        onChangeIntensity={toggleDescriptor}
-      />
+      {isLoadingAttributes && (
+        <View style={styles.infoBox}>
+          <Text style={styles.infoText}>Cargando rueda de sabores...</Text>
+        </View>
+      )}
+
+      {attributesError && (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{attributesError}</Text>
+        </View>
+      )}
+
+      {showDescriptorWarning && (
+        <View style={styles.warningBox}>
+          <Text style={styles.warningText}>
+            Aún no has seleccionado descriptores. El puntaje se actualizará
+            cuando selecciones al menos un atributo de sabor.
+          </Text>
+        </View>
+      )}
+
+      {!isLoadingAttributes && !attributesError && (
+        <FlavorWheel
+          attributes={attributes}
+          selectedIntensities={selectedIntensities}
+          onChangeIntensity={toggleDescriptor}
+        />
+      )}
 
       <View style={styles.notesCard}>
         <Text style={styles.notesLabel}>Notas adicionales</Text>
@@ -301,6 +373,57 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#6F4E37',
+  },
+
+  helperText: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#7A6A5C',
+    lineHeight: 18,
+  },
+
+  infoBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#EEE6DA',
+  },
+
+  infoText: {
+    color: '#6F4E37',
+    fontWeight: '700',
+  },
+
+  warningBox: {
+    backgroundColor: '#FFF6E6',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E8C98D',
+  },
+
+  warningText: {
+    color: '#8A5A16',
+    fontWeight: '700',
+    lineHeight: 19,
+  },
+
+  errorBox: {
+    backgroundColor: '#FDECEC',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E7A4A4',
+  },
+
+  errorText: {
+    color: '#9E2A2B',
+    fontWeight: '700',
+    lineHeight: 19,
   },
 
   notesCard: {

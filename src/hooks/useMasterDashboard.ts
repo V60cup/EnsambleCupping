@@ -15,6 +15,29 @@ function roundTwo(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function findRootCategory(
+  attributeId: string,
+  attributesById: Record<string, FlavorAttribute>
+): FlavorAttribute | null {
+  let current = attributesById[attributeId];
+
+  if (!current) {
+    return null;
+  }
+
+  while (current.parentId) {
+    const parent = attributesById[current.parentId];
+
+    if (!parent) {
+      break;
+    }
+
+    current = parent;
+  }
+
+  return current;
+}
+
 function aggregate(
   coffee: SessionCoffee,
   scores: TasterScore[],
@@ -44,7 +67,17 @@ function aggregate(
     }
   > = {};
 
+  const categoryCounts: Record<
+    string,
+    {
+      name: string;
+      count: number;
+    }
+  > = {};
+
   for (const score of scores) {
+    const uniqueDescriptorIdsForTaster = new Set<string>();
+
     for (const selection of score.descriptors) {
       if (!descriptorTally[selection.attributeId]) {
         descriptorTally[selection.attributeId] = {
@@ -53,8 +86,25 @@ function aggregate(
         };
       }
 
-      descriptorTally[selection.attributeId].count += 1;
+      if (!uniqueDescriptorIdsForTaster.has(selection.attributeId)) {
+        descriptorTally[selection.attributeId].count += 1;
+        uniqueDescriptorIdsForTaster.add(selection.attributeId);
+      }
+
       descriptorTally[selection.attributeId].intensitySum += selection.intensity;
+
+      const rootCategory = findRootCategory(selection.attributeId, attributesById);
+
+      if (rootCategory) {
+        if (!categoryCounts[rootCategory.id]) {
+          categoryCounts[rootCategory.id] = {
+            name: rootCategory.name,
+            count: 0,
+          };
+        }
+
+        categoryCounts[rootCategory.id].count += 1;
+      }
     }
   }
 
@@ -79,6 +129,24 @@ function aggregate(
     })
     .slice(0, 8);
 
+  const descriptorConsensus = Object.entries(descriptorTally)
+    .map(([attributeId, value]) => ({
+      attributeId,
+      name: attributesById[attributeId]?.name ?? attributeId,
+      percentage:
+        scores.length === 0 ? 0 : roundTwo((value.count / scores.length) * 100),
+    }))
+    .sort((a, b) => b.percentage - a.percentage)
+    .slice(0, 8);
+
+  const categorySummary = Object.entries(categoryCounts)
+    .map(([categoryId, value]) => ({
+      categoryId,
+      name: value.name,
+      count: value.count,
+    }))
+    .sort((a, b) => b.count - a.count);
+
   return {
     coffeeId: coffee.id,
     coffeeName: coffee.name,
@@ -86,6 +154,8 @@ function aggregate(
     averageScore,
     scoreByTaster,
     topDescriptors,
+    descriptorConsensus,
+    categorySummary,
   };
 }
 
