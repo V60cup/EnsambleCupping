@@ -14,6 +14,7 @@ import Svg, {
   Path,
   Text as SvgText,
   Circle,
+  Line,
 } from 'react-native-svg';
 
 import { FlavorAttribute } from '../types/domain';
@@ -114,6 +115,20 @@ export function FlavorWheel({
 
   const innerRadius = size * 0.23;
   const outerRadius = size * 0.46;
+
+  // Anillos concéntricos numerados 0-9, puramente decorativos: dan la
+  // referencia visual de intensidad estilo hoja de cata SCA, igual que en la
+  // imagen de referencia, sin cambiar la interacción (la intensidad real se
+  // sigue eligiendo en el panel de abajo, no tocando un radio).
+  const intensityRings = useMemo(() => {
+    const ringCount = 9; // anillos 1..9 (el centro ya representa el 0)
+    const step = (outerRadius - innerRadius) / ringCount;
+
+    return Array.from({ length: ringCount }, (_, index) => ({
+      level: index + 1,
+      radius: innerRadius + step * (index + 1),
+    }));
+  }, [innerRadius, outerRadius]);
 
   const attributesById = useMemo(() => {
     const map: Record<string, FlavorAttribute> = {};
@@ -293,6 +308,48 @@ export function FlavorWheel({
       <View style={styles.wheelWrapper}>
         <Svg width={size} height={size}>
           <G>
+            {/* Anillos de fondo estilo SCA: puramente decorativos, van detrás
+                de las cuñas. Se dibujan primero para que las cuñas (con su
+                opacidad) queden por encima. */}
+            {intensityRings.map((ring) => (
+              <Circle
+                key={`ring-${ring.level}`}
+                cx={cx}
+                cy={cy}
+                r={ring.radius}
+                fill="none"
+                stroke={theme.colors.border}
+                strokeWidth={1}
+                opacity={0.5}
+              />
+            ))}
+
+            {/* Línea radial de referencia (hacia las 12 en punto) sobre la
+                que se apoyan las etiquetas numéricas de los anillos. */}
+            <Line
+              x1={cx}
+              y1={cy - innerRadius}
+              x2={cx}
+              y2={cy - outerRadius}
+              stroke={theme.colors.border}
+              strokeWidth={1}
+              opacity={0.5}
+            />
+
+            {intensityRings.map((ring) => (
+              <SvgText
+                key={`ring-label-${ring.level}`}
+                x={cx + 4}
+                y={cy - ring.radius + 3}
+                fontSize={9}
+                fontWeight="700"
+                fill={theme.colors.textMuted}
+                opacity={0.7}
+              >
+                {ring.level}
+              </SvgText>
+            ))}
+
             {segments.map((segment) => {
               const selected = (selectedIntensities[segment.attr.id] ?? 0) > 0;
               const active = activeAttributeId === segment.attr.id;
@@ -313,7 +370,7 @@ export function FlavorWheel({
                   : midAngle - 90;
 
               const fill = selected ? theme.colors.accent : segment.color;
-              const opacity = selected || active ? 1 : segment.hasChildren ? 0.82 : 0.68;
+              const opacity = selected || active ? 1 : segment.hasChildren ? 0.78 : 0.62;
 
               return (
                 <G key={segment.attr.id}>

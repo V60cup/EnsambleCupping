@@ -332,7 +332,7 @@ function CoffeeResultCard({
   attributesById: Record<string, FlavorAttribute>;
 }) {
   const { theme } = useTheme();
-  const { result, kpis } = useCoffeeDashboard(
+  const { result, kpis, rawProfiles } = useCoffeeDashboard(
     sessionId,
     coffee,
     attributesById
@@ -369,11 +369,11 @@ function CoffeeResultCard({
           ]}
         >
           <Text style={[styles.scorePillLabel, { color: theme.colors.textMuted }]}>
-            Score
+            Idoneidad
           </Text>
 
           <Text style={[styles.scorePillValue, { color: theme.colors.primarySoft }]}>
-            {result.averageScore > 0 ? result.averageScore.toFixed(2) : '—'}
+            {kpis.totalTasters > 0 ? result.averageSuitability.toFixed(1) : '—'}
           </Text>
         </View>
       </View>
@@ -395,19 +395,36 @@ function CoffeeResultCard({
         />
       </View>
 
+      <View style={styles.innerKpiRow}>
+        <MiniMetric
+          label="Dulce"
+          value={result.basicTastesAverage.sweet.toFixed(1)}
+        />
+
+        <MiniMetric
+          label="Ácido"
+          value={result.basicTastesAverage.sourAcidic.toFixed(1)}
+        />
+
+        <MiniMetric
+          label="Amargo"
+          value={result.basicTastesAverage.bitter.toFixed(1)}
+        />
+      </View>
+
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>
           Catadores
         </Text>
 
-        {result.scoreByTaster.length === 0 ? (
+        {rawProfiles.length === 0 ? (
           <Text style={[styles.mutedText, { color: theme.colors.textMuted }]}>
             Aún no hay evaluaciones para esta muestra.
           </Text>
         ) : (
-          result.scoreByTaster.map((taster) => (
+          rawProfiles.map((profile) => (
             <View
-              key={taster.userId}
+              key={profile.userId}
               style={[
                 styles.tasterRow,
                 {
@@ -416,7 +433,7 @@ function CoffeeResultCard({
               ]}
             >
               <Text style={[styles.tasterName, { color: theme.colors.text }]}>
-                {taster.displayName}
+                {profile.displayName}
               </Text>
 
               <Text
@@ -427,7 +444,8 @@ function CoffeeResultCard({
                   },
                 ]}
               >
-                {taster.score.toFixed(2)}
+                {profile.descriptors.length} descriptores · idoneidad{' '}
+                {profile.suitability.toFixed(1)}
               </Text>
             </View>
           ))

@@ -1,71 +1,74 @@
-// src/hooks/useTasterScoring.ts
+// src/hooks/useTasterProfile.ts
+//
+// Reemplaza al antiguo useTasterScoring. Ya no calcula ningún puntaje: el
+// catador caracteriza el café (descriptores de aroma de la rueda, gustos
+// básicos, idoneidad/propósito y notas) y eso se persiste tal cual, sin
+// reducirlo a un número.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  BasicTasteKey,
+  BasicTasteRatings,
   DescriptorSelection,
-  FlavorAttribute,
-  ScoringProfile,
 } from '../types/domain';
 
-import { computeScore } from '../scoring/engine';
-import { upsertTasterScore } from '../services/scoreService';
+import { upsertTasterProfile } from '../services/scoreService';
 
-interface UseTasterScoringArgs {
+interface UseTasterProfileArgs {
   sessionId: string;
   coffeeId: string;
   userId: string;
   displayName: string;
-  attributesById: Record<string, FlavorAttribute>;
-  profile: ScoringProfile;
   initialSelections?: DescriptorSelection[];
+  initialBasicTastes?: BasicTasteRatings;
+  initialSuitability?: number;
   debounceMs?: number;
 }
 
-export function useTasterScoring({
+const EMPTY_BASIC_TASTES: BasicTasteRatings = {
+  sweet: 0,
+  sourAcidic: 0,
+  bitter: 0,
+};
+
+export function useTasterProfile({
   sessionId,
   coffeeId,
   userId,
   displayName,
-  attributesById,
-  profile,
   initialSelections = [],
+  initialBasicTastes = EMPTY_BASIC_TASTES,
+  initialSuitability = 0,
   debounceMs = 600,
-}: UseTasterScoringArgs) {
+}: UseTasterProfileArgs) {
   const [selections, setSelections] =
     useState<DescriptorSelection[]>(initialSelections);
+
+  const [basicTastes, setBasicTastes] =
+    useState<BasicTasteRatings>(initialBasicTastes);
+
+  const [suitability, setSuitability] = useState<number>(initialSuitability);
 
   const [notes, setNotes] = useState('');
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Evita que el efecto de persistencia dispare una escritura en el montaje
-  // inicial (cuando selections === initialSelections, no hay nada nuevo que
-  // guardar). Esto eliminaba una escritura de red "gratis" cada vez que el
-  // catador cambiaba de café, antes de tocar nada.
+  // inicial (cuando todo sigue igual a los valores iniciales).
   const isFirstRender = useRef(true);
 
-  const liveScore = useMemo(() => {
-    return computeScore({
-      selections,
-      attributesById,
-      profile,
-    });
-  }, [selections, attributesById, profile]);
-
   const persist = useCallback(() => {
-    upsertTasterScore({
+    upsertTasterProfile({
       sessionId,
       coffeeId,
       userId,
       displayName,
       descriptors: selections,
-      computedScore: liveScore,
+      basicTastes,
+      suitability,
       notes,
     }).catch((err) => {
-      console.warn(
-        'No se pudo guardar el score:',
-        err
-      );
+      console.warn('No se pudo guardar el perfil de catación:', err);
     });
   }, [
     sessionId,
@@ -73,7 +76,8 @@ export function useTasterScoring({
     userId,
     displayName,
     selections,
-    liveScore,
+    basicTastes,
+    suitability,
     notes,
   ]);
 
@@ -87,14 +91,20 @@ export function useTasterScoring({
       clearTimeout(debounceRef.current);
     }
 
-    // La primera selección de la sesión de catación para este café se guarda
-    // de inmediato (sin esperar el debounce): así el Master ve aparecer al
-    // catador en el dashboard en vivo sin demora perceptible. Los cambios
-    // siguientes (ajustar intensidad, agregar más descriptores) sí usan
-    // debounce para no saturar Firestore con cada toque.
-    const isFirstSelection = selections.length === 1 && notes === '';
+    // La primera selección dentro de este café se guarda de inmediato (sin
+    // esperar el debounce): así el Master ve aparecer al catador en el
+    // dashboard en vivo sin demora perceptible. Los cambios siguientes
+    // (ajustar intensidad, agregar más descriptores, tocar gustos básicos)
+    // sí usan debounce para no saturar Firestore con cada toque.
+    const isFirstMeaningfulChange =
+      selections.length === 1 &&
+      notes === '' &&
+      basicTastes.sweet === 0 &&
+      basicTastes.sourAcidic === 0 &&
+      basicTastes.bitter === 0 &&
+      suitability === 0;
 
-    if (isFirstSelection) {
+    if (isFirstMeaningfulChange) {
       persist();
     } else {
       debounceRef.current = setTimeout(persist, debounceMs);
@@ -146,11 +156,21 @@ export function useTasterScoring({
     });
   }, []);
 
+  const setBasicTaste = useCallback((key: BasicTasteKey, value: number) => {
+    setBasicTastes((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  }, []);
+
   return {
     selections,
-    liveScore,
+    basicTastes,
+    suitability,
     notes,
     setNotes,
     toggleDescriptor,
+    setBasicTaste,
+    setSuitability,
   };
 }

@@ -1,34 +1,41 @@
 // src/services/scoreService.ts
-// Escritura y lectura de puntajes. Clave de diseño: un único documento por
-// (sessionId, coffeeId, userId) que se SOBREESCRIBE en cada cambio (setDoc con merge),
-// en vez de crear un documento nuevo por cada click. Esto mantiene el costo de
-// Firestore bajo y hace trivial el listener en vivo del Master.
+// Escritura y lectura de perfiles de catación. Clave de diseño: un único
+// documento por (sessionId, coffeeId, userId) que se SOBREESCRIBE en cada
+// cambio (setDoc con merge), en vez de crear un documento nuevo por cada
+// click. Esto mantiene el costo de Firestore bajo y hace trivial el listener
+// en vivo del Master.
+//
+// No se calcula ni se guarda ningún puntaje: lo que se persiste es la
+// caracterización sensorial completa del catador (descriptores de aroma +
+// gustos básicos + idoneidad + notas).
 
 import { collection, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { DescriptorSelection, TasterScore } from '../types/domain';
+import { BasicTasteRatings, DescriptorSelection, TasterProfile } from '../types/domain';
 
-function scoreDocRef(sessionId: string, coffeeId: string, userId: string) {
+function profileDocRef(sessionId: string, coffeeId: string, userId: string) {
   return doc(db, 'sessions', sessionId, 'coffees', coffeeId, 'scores', userId);
 }
 
-export async function upsertTasterScore(args: {
+export async function upsertTasterProfile(args: {
   sessionId: string;
   coffeeId: string;
   userId: string;
   displayName: string;
   descriptors: DescriptorSelection[];
-  computedScore: number;
+  basicTastes: BasicTasteRatings;
+  suitability: number;
   notes?: string;
 }) {
-  const ref = scoreDocRef(args.sessionId, args.coffeeId, args.userId);
-  const payload: TasterScore = {
+  const ref = profileDocRef(args.sessionId, args.coffeeId, args.userId);
+  const payload: TasterProfile = {
     userId: args.userId,
     displayName: args.displayName,
     sessionId: args.sessionId,
     coffeeId: args.coffeeId,
     descriptors: args.descriptors,
-    computedScore: args.computedScore,
+    basicTastes: args.basicTastes,
+    suitability: args.suitability,
     notes: args.notes,
     updatedAt: Date.now(),
   };
@@ -37,35 +44,35 @@ export async function upsertTasterScore(args: {
 }
 
 /**
- * Listener en vivo para TODOS los scores de un café dentro de una sesión.
- * Esto es lo que usa el Master Dashboard: no hace falta pull manual, Firestore
- * empuja los cambios apenas un catador sincroniza (incluso si escribió offline
- * y reconectó después).
+ * Listener en vivo para TODOS los perfiles de catación de un café dentro de
+ * una sesión. Esto es lo que usa el Master Dashboard: no hace falta pull
+ * manual, Firestore empuja los cambios apenas un catador sincroniza (incluso
+ * si escribió offline y reconectó después).
  */
-export function listenToCoffeeScores(
+export function listenToCoffeeProfiles(
   sessionId: string,
   coffeeId: string,
-  callback: (scores: TasterScore[]) => void
+  callback: (profiles: TasterProfile[]) => void
 ) {
-  const scoresCol = collection(db, 'sessions', sessionId, 'coffees', coffeeId, 'scores');
-  return onSnapshot(scoresCol, (snap) => {
-    const scores = snap.docs.map((d) => d.data() as TasterScore);
-    callback(scores);
+  const profilesCol = collection(db, 'sessions', sessionId, 'coffees', coffeeId, 'scores');
+  return onSnapshot(profilesCol, (snap) => {
+    const profiles = snap.docs.map((d) => d.data() as TasterProfile);
+    callback(profiles);
   });
 }
 
 /**
- * Listener para el score de UN catador específico en UN café — útil para que
- * el propio catador vea su selección reflejada (ej. al reabrir la app).
+ * Listener para el perfil de UN catador específico en UN café — útil para
+ * que el propio catador vea su selección reflejada (ej. al reabrir la app).
  */
-export function listenToOwnScore(
+export function listenToOwnProfile(
   sessionId: string,
   coffeeId: string,
   userId: string,
-  callback: (score: TasterScore | null) => void
+  callback: (profile: TasterProfile | null) => void
 ) {
-  const ref = scoreDocRef(sessionId, coffeeId, userId);
+  const ref = profileDocRef(sessionId, coffeeId, userId);
   return onSnapshot(ref, (snap) => {
-    callback(snap.exists() ? (snap.data() as TasterScore) : null);
+    callback(snap.exists() ? (snap.data() as TasterProfile) : null);
   });
 }

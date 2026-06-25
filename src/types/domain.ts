@@ -27,26 +27,21 @@ export interface FlavorAttribute {
  */
 export interface DescriptorSelection {
   attributeId: string;
-  intensity: number; // normalmente 1-5 o 1-10, lo define el ScoringProfile
+  intensity: number; // normalmente 1-5 o 1-10, lo define la rueda en uso
 }
 
 /**
- * Define cómo se calcula el puntaje final a partir de las DescriptorSelection.
- * Esto es lo que permite tener "varios sistemas por defecto + extensibilidad":
- * cada organización puede tener su propio ScoringProfile.
+ * Los tres gustos básicos que se evalúan de forma independiente a la rueda
+ * de aromas, igual que en las hojas de cata estilo SCA: cada uno con su
+ * propia escala de intensidad (0-9), sin jerarquía ni sub-descriptores.
  */
-export interface ScoringProfile {
-  id: string;
-  organizationId: string | null; // null = perfil default del sistema (ej. "SCA clásico")
-  name: string;
-  description?: string;
-  baselineScore: number; // ej. 80, como en SCA / Coffee Rose
-  intensityScale: { min: number; max: number };
-  formula: 'weighted_sum' | 'weighted_avg' | 'custom';
-  attributeWeights?: Record<string, number>;
-  customFormulaRef?: string;
-  createdAt: number;
-}
+export type BasicTasteKey = 'sweet' | 'sourAcidic' | 'bitter';
+
+export type BasicTasteRatings = Record<BasicTasteKey, number>;
+
+export const BASIC_TASTE_SCALE = { min: 0, max: 9 };
+
+export const SUITABILITY_SCALE = { min: 0, max: 9 };
 
 export interface Organization {
   id: string;
@@ -71,7 +66,6 @@ export interface TastingSession {
   id: string;
   name: string;
   masterId: string;
-  scoringProfileId: string;
   status: SessionStatus;
   joinCode: string;
   isBlind: boolean;
@@ -99,34 +93,35 @@ export interface SessionCoffee {
 }
 
 /**
- * El puntaje de UN catador para UN café dentro de una sesión.
+ * La caracterización sensorial que hace UN catador para UN café dentro de
+ * una sesión: qué descriptores de aroma marcó (con su intensidad), cómo
+ * calificó los gustos básicos, qué tan adecuado le pareció el café para su
+ * propósito (suitability), y sus notas libres. No hay un puntaje calculado:
+ * el objetivo es categorizar y describir, no puntuar.
  */
-export interface TasterScore {
+export interface TasterProfile {
   userId: string;
   displayName: string;
   sessionId: string;
   coffeeId: string;
   descriptors: DescriptorSelection[];
+  basicTastes: BasicTasteRatings;
+  suitability: number;
   notes?: string;
-  computedScore: number;
   updatedAt: number;
 }
 
 /**
- * Resultado agregado que ve el Master en el dashboard.
+ * Resultado agregado que ve el Master en el dashboard: no es un promedio de
+ * puntaje, sino un consenso de qué tan presente está cada descriptor /
+ * categoría / gusto básico entre los catadores que evaluaron el café.
  */
 export interface AggregatedCoffeeResult {
   coffeeId: string;
   coffeeName: string;
   tableLabel: string;
 
-  averageScore: number;
-
-  scoreByTaster: {
-    userId: string;
-    displayName: string;
-    score: number;
-  }[];
+  totalTasters: number;
 
   topDescriptors: {
     attributeId: string;
@@ -145,5 +140,10 @@ export interface AggregatedCoffeeResult {
     categoryId: string;
     name: string;
     count: number;
+    avgIntensity: number;
   }[];
+
+  basicTastesAverage: BasicTasteRatings;
+
+  averageSuitability: number;
 }

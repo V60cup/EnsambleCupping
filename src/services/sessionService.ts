@@ -64,7 +64,6 @@ export async function createSession(args: {
   name: string;
   masterId: string;
   masterDisplayName: string;
-  scoringProfileId: string;
   isBlind: boolean;
 }): Promise<{ sessionId: string }> {
   const currentUserId = getCurrentUserId();
@@ -72,7 +71,6 @@ export async function createSession(args: {
   const sessionRef = await addDoc(sessionsCol, {
     name: args.name,
     masterId: currentUserId,
-    scoringProfileId: args.scoringProfileId,
     status: 'open',
     isBlind: args.isBlind,
     createdAt: Date.now(),

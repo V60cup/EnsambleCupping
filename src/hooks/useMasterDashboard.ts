@@ -4,12 +4,13 @@ import { useEffect, useMemo, useState } from 'react';
 
 import {
   AggregatedCoffeeResult,
+  BasicTasteRatings,
   FlavorAttribute,
   SessionCoffee,
-  TasterScore,
+  TasterProfile,
 } from '../types/domain';
 
-import { listenToCoffeeScores } from '../services/scoreService';
+import { listenToCoffeeProfiles } from '../services/scoreService';
 
 function roundTwo(value: number): number {
   return Math.round(value * 100) / 100;
@@ -38,27 +39,32 @@ function findRootCategory(
   return current;
 }
 
+function averageBasicTastes(profiles: TasterProfile[]): BasicTasteRatings {
+  if (profiles.length === 0) {
+    return { sweet: 0, sourAcidic: 0, bitter: 0 };
+  }
+
+  const totals = profiles.reduce(
+    (acc, profile) => ({
+      sweet: acc.sweet + profile.basicTastes.sweet,
+      sourAcidic: acc.sourAcidic + profile.basicTastes.sourAcidic,
+      bitter: acc.bitter + profile.basicTastes.bitter,
+    }),
+    { sweet: 0, sourAcidic: 0, bitter: 0 }
+  );
+
+  return {
+    sweet: roundTwo(totals.sweet / profiles.length),
+    sourAcidic: roundTwo(totals.sourAcidic / profiles.length),
+    bitter: roundTwo(totals.bitter / profiles.length),
+  };
+}
+
 function aggregate(
   coffee: SessionCoffee,
-  scores: TasterScore[],
+  profiles: TasterProfile[],
   attributesById: Record<string, FlavorAttribute>
 ): AggregatedCoffeeResult {
-  const averageScore =
-    scores.length === 0
-      ? 0
-      : roundTwo(
-          scores.reduce((sum, score) => sum + score.computedScore, 0) /
-            scores.length
-        );
-
-  const scoreByTaster = scores
-    .map((score) => ({
-      userId: score.userId,
-      displayName: score.displayName,
-      score: score.computedScore,
-    }))
-    .sort((a, b) => b.score - a.score);
-
   const descriptorTally: Record<
     string,
     {
@@ -67,18 +73,19 @@ function aggregate(
     }
   > = {};
 
-  const categoryCounts: Record<
+  const categoryTally: Record<
     string,
     {
       name: string;
       count: number;
+      intensitySum: number;
     }
   > = {};
 
-  for (const score of scores) {
+  for (const profile of profiles) {
     const uniqueDescriptorIdsForTaster = new Set<string>();
 
-    for (const selection of score.descriptors) {
+    for (const selection of profile.descriptors) {
       if (!descriptorTally[selection.attributeId]) {
         descriptorTally[selection.attributeId] = {
           count: 0,
@@ -96,14 +103,16 @@ function aggregate(
       const rootCategory = findRootCategory(selection.attributeId, attributesById);
 
       if (rootCategory) {
-        if (!categoryCounts[rootCategory.id]) {
-          categoryCounts[rootCategory.id] = {
+        if (!categoryTally[rootCategory.id]) {
+          categoryTally[rootCategory.id] = {
             name: rootCategory.name,
             count: 0,
+            intensitySum: 0,
           };
         }
 
-        categoryCounts[rootCategory.id].count += 1;
+        categoryTally[rootCategory.id].count += 1;
+        categoryTally[rootCategory.id].intensitySum += selection.intensity;
       }
     }
   }
@@ -134,28 +143,38 @@ function aggregate(
       attributeId,
       name: attributesById[attributeId]?.name ?? attributeId,
       percentage:
-        scores.length === 0 ? 0 : roundTwo((value.count / scores.length) * 100),
+        profiles.length === 0 ? 0 : roundTwo((value.count / profiles.length) * 100),
     }))
     .sort((a, b) => b.percentage - a.percentage)
     .slice(0, 8);
 
-  const categorySummary = Object.entries(categoryCounts)
+  const categorySummary = Object.entries(categoryTally)
     .map(([categoryId, value]) => ({
       categoryId,
       name: value.name,
       count: value.count,
+      avgIntensity: value.count === 0 ? 0 : roundTwo(value.intensitySum / value.count),
     }))
     .sort((a, b) => b.count - a.count);
+
+  const averageSuitability =
+    profiles.length === 0
+      ? 0
+      : roundTwo(
+          profiles.reduce((sum, profile) => sum + profile.suitability, 0) /
+            profiles.length
+        );
 
   return {
     coffeeId: coffee.id,
     coffeeName: coffee.name,
     tableLabel: coffee.tableLabel,
-    averageScore,
-    scoreByTaster,
+    totalTasters: profiles.length,
     topDescriptors,
     descriptorConsensus,
     categorySummary,
+    basicTastesAverage: averageBasicTastes(profiles),
+    averageSuitability,
   };
 }
 
@@ -164,15 +183,15 @@ export function useCoffeeDashboard(
   coffee: SessionCoffee | null,
   attributesById: Record<string, FlavorAttribute>
 ) {
-  const [scores, setScores] = useState<TasterScore[]>([]);
+  const [profiles, setProfiles] = useState<TasterProfile[]>([]);
 
   useEffect(() => {
     if (!coffee) {
-      setScores([]);
+      setProfiles([]);
       return;
     }
 
-    const unsubscribe = listenToCoffeeScores(sessionId, coffee.id, setScores);
+    const unsubscribe = listenToCoffeeProfiles(sessionId, coffee.id, setProfiles);
 
     return unsubscribe;
   }, [sessionId, coffee?.id]);
@@ -182,14 +201,14 @@ export function useCoffeeDashboard(
       return null;
     }
 
-    return aggregate(coffee, scores, attributesById);
-  }, [coffee, scores, attributesById]);
+    return aggregate(coffee, profiles, attributesById);
+  }, [coffee, profiles, attributesById]);
 
   const kpis = useMemo(() => {
-    const totalTasters = scores.length;
+    const totalTasters = profiles.length;
 
-    const totalDescriptorMentions = scores.reduce((sum, score) => {
-      return sum + score.descriptors.length;
+    const totalDescriptorMentions = profiles.reduce((sum, profile) => {
+      return sum + profile.descriptors.length;
     }, 0);
 
     const averageDescriptorsPerTaster =
@@ -201,13 +220,13 @@ export function useCoffeeDashboard(
       totalTasters,
       totalDescriptorMentions,
       averageDescriptorsPerTaster,
-      averageScore: result?.averageScore ?? 0,
+      averageSuitability: result?.averageSuitability ?? 0,
     };
-  }, [scores, result]);
+  }, [profiles, result]);
 
   return {
     result,
-    rawScores: scores,
+    rawProfiles: profiles,
     kpis,
   };
 }

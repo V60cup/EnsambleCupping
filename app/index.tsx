@@ -24,7 +24,6 @@ import {
   registerMasterUser,
 } from '../src/services/authService';
 
-import { DEFAULT_PROFILE_SCA_LIKE } from '../src/scoring/profiles/defaults';
 import { useAuth } from '../src/hooks/useAuth';
 import { useTheme } from '../src/theme/ThemeProvider';
 import { ThemeToggle } from '../src/components/ui/ThemeToggle';
@@ -160,7 +159,6 @@ export default function Home() {
         name: sessionName.trim(),
         masterId: masterUser.uid,
         masterDisplayName: nameForSession,
-        scoringProfileId: DEFAULT_PROFILE_SCA_LIKE.id,
         isBlind: false,
       });
 
@@ -185,7 +183,7 @@ export default function Home() {
         <View style={styles.topBar}>
           <View>
             <Text style={[styles.brandEyebrow, { color: theme.colors.accent }]}>
-              CoffeeMind
+              Ensamble
             </Text>
 
             <Text style={[styles.title, { color: theme.colors.text }]}>

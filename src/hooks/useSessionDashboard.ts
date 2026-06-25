@@ -1,27 +1,76 @@
 // src/hooks/useSessionDashboard.ts
+//
+// Ya no rankea cafés de "mejor" a "peor" (no existe un puntaje para
+// compararlos). Los cafés se muestran en el orden en que fueron agregados
+// a la sesión, cada uno con su propio resumen de consenso/intensidad.
 
 import { useEffect, useMemo, useState } from 'react';
 
 import {
-  AggregatedCoffeeResult,
+  BasicTasteRatings,
   FlavorAttribute,
   SessionCoffee,
-  TasterScore,
+  TasterProfile,
 } from '../types/domain';
 
 import { listenToCoffees } from '../services/sessionService';
-import { listenToCoffeeScores } from '../services/scoreService';
+import { listenToCoffeeProfiles } from '../services/scoreService';
 
 function roundTwo(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-interface SessionCoffeeResult {
+interface SessionCoffeeSummary {
   coffeeId: string;
   coffeeName: string;
   tableLabel: string;
-  averageScore: number;
   totalTasters: number;
+  averageSuitability: number;
+  basicTastesAverage: BasicTasteRatings;
+  topDescriptorName: string | null;
+}
+
+function averageBasicTastes(profiles: TasterProfile[]): BasicTasteRatings {
+  if (profiles.length === 0) {
+    return { sweet: 0, sourAcidic: 0, bitter: 0 };
+  }
+
+  const totals = profiles.reduce(
+    (acc, profile) => ({
+      sweet: acc.sweet + profile.basicTastes.sweet,
+      sourAcidic: acc.sourAcidic + profile.basicTastes.sourAcidic,
+      bitter: acc.bitter + profile.basicTastes.bitter,
+    }),
+    { sweet: 0, sourAcidic: 0, bitter: 0 }
+  );
+
+  return {
+    sweet: roundTwo(totals.sweet / profiles.length),
+    sourAcidic: roundTwo(totals.sourAcidic / profiles.length),
+    bitter: roundTwo(totals.bitter / profiles.length),
+  };
+}
+
+function topDescriptorName(
+  profiles: TasterProfile[],
+  attributesById: Record<string, FlavorAttribute>
+): string | null {
+  const tally: Record<string, number> = {};
+
+  for (const profile of profiles) {
+    for (const selection of profile.descriptors) {
+      tally[selection.attributeId] = (tally[selection.attributeId] ?? 0) + 1;
+    }
+  }
+
+  const entries = Object.entries(tally).sort((a, b) => b[1] - a[1]);
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const [topAttributeId] = entries[0];
+  return attributesById[topAttributeId]?.name ?? topAttributeId;
 }
 
 export function useSessionDashboard(
@@ -29,8 +78,8 @@ export function useSessionDashboard(
   attributesById: Record<string, FlavorAttribute>
 ) {
   const [coffees, setCoffees] = useState<SessionCoffee[]>([]);
-  const [scoresByCoffee, setScoresByCoffee] = useState<
-    Record<string, TasterScore[]>
+  const [profilesByCoffee, setProfilesByCoffee] = useState<
+    Record<string, TasterProfile[]>
   >({});
 
   useEffect(() => {
@@ -43,13 +92,13 @@ export function useSessionDashboard(
     const unsubscribers: Array<() => void> = [];
 
     coffees.forEach((coffee) => {
-      const unsubscribe = listenToCoffeeScores(
+      const unsubscribe = listenToCoffeeProfiles(
         sessionId,
         coffee.id,
-        (scores) => {
-          setScoresByCoffee((current) => ({
+        (profiles) => {
+          setProfilesByCoffee((current) => ({
             ...current,
-            [coffee.id]: scores,
+            [coffee.id]: profiles,
           }));
         }
       );
@@ -62,64 +111,54 @@ export function useSessionDashboard(
     };
   }, [sessionId, coffees]);
 
-  const ranking = useMemo<SessionCoffeeResult[]>(() => {
-    return coffees
-      .map((coffee) => {
-        const scores = scoresByCoffee[coffee.id] ?? [];
+  // Orden de creación, no de "mejor a peor": no hay score con el que rankear.
+  const summaries = useMemo<SessionCoffeeSummary[]>(() => {
+    return coffees.map((coffee) => {
+      const profiles = profilesByCoffee[coffee.id] ?? [];
 
-        const averageScore =
-          scores.length === 0
-            ? 0
-            : roundTwo(
-                scores.reduce(
-                  (sum, score) => sum + score.computedScore,
-                  0
-                ) / scores.length
-              );
+      const averageSuitability =
+        profiles.length === 0
+          ? 0
+          : roundTwo(
+              profiles.reduce((sum, profile) => sum + profile.suitability, 0) /
+                profiles.length
+            );
 
-        return {
-          coffeeId: coffee.id,
-          coffeeName: coffee.name,
-          tableLabel: coffee.tableLabel,
-          averageScore,
-          totalTasters: scores.length,
-        };
-      })
-      .sort((a, b) => b.averageScore - a.averageScore);
-  }, [coffees, scoresByCoffee]);
+      return {
+        coffeeId: coffee.id,
+        coffeeName: coffee.name,
+        tableLabel: coffee.tableLabel,
+        totalTasters: profiles.length,
+        averageSuitability,
+        basicTastesAverage: averageBasicTastes(profiles),
+        topDescriptorName: topDescriptorName(profiles, attributesById),
+      };
+    });
+  }, [coffees, profilesByCoffee, attributesById]);
 
   const summary = useMemo(() => {
-    if (ranking.length === 0) {
+    if (summaries.length === 0) {
       return {
         totalCoffees: 0,
-        bestCoffee: null,
-        worstCoffee: null,
-        averageSessionScore: 0,
+        totalTastersAcrossSession: 0,
       };
     }
 
-    const bestCoffee = ranking[0];
-    const worstCoffee = ranking[ranking.length - 1];
-
-    const averageSessionScore = roundTwo(
-      ranking.reduce(
-        (sum, coffee) => sum + coffee.averageScore,
-        0
-      ) / ranking.length
+    const totalTastersAcrossSession = summaries.reduce(
+      (sum, coffee) => sum + coffee.totalTasters,
+      0
     );
 
     return {
-      totalCoffees: ranking.length,
-      bestCoffee,
-      worstCoffee,
-      averageSessionScore,
+      totalCoffees: summaries.length,
+      totalTastersAcrossSession,
     };
-  }, [ranking]);
+  }, [summaries]);
 
   return {
-    ranking,
+    summaries,
     summary,
     coffees,
-    scoresByCoffee,
+    profilesByCoffee,
   };
 }

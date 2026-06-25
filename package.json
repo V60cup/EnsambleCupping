@@ -6,9 +6,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web",
-    "test:scoring": "node --loader ts-node/esm src/scoring/__manual_test__.ts"
-  },
+    "web": "expo start --web"
+    },
   "dependencies": {
     "@react-native-async-storage/async-storage": "1.23.1",
     "expo": "~52.0.0",

@@ -20,9 +20,9 @@ import {
   indexAttributesById,
 } from '../services/flavorAttributeService';
 
-import { DEFAULT_PROFILE_SCA_LIKE } from '../scoring/profiles/defaults';
-import { useTasterScoring } from '../hooks/useTasterScoring';
+import { useTasterProfile } from '../hooks/useTasterProfile';
 import { FlavorWheel } from './FlavorWheel';
+import { RatingSlider } from './ui/RatingSlider';
 
 interface Props {
   sessionId: string;
@@ -206,15 +206,21 @@ function CoffeeScoringPanel({
   isLoadingAttributes,
   attributesError,
 }: CoffeeScoringPanelProps) {
-  const { selections, liveScore, notes, setNotes, toggleDescriptor } =
-    useTasterScoring({
-      sessionId,
-      coffeeId: coffee.id,
-      userId,
-      displayName,
-      attributesById,
-      profile: DEFAULT_PROFILE_SCA_LIKE,
-    });
+  const {
+    selections,
+    basicTastes,
+    suitability,
+    notes,
+    setNotes,
+    toggleDescriptor,
+    setBasicTaste,
+    setSuitability,
+  } = useTasterProfile({
+    sessionId,
+    coffeeId: coffee.id,
+    userId,
+    displayName,
+  });
 
   const selectedIntensities = useMemo(() => {
     return selections.reduce((acc, selection) => {
@@ -236,13 +242,9 @@ function CoffeeScoringPanel({
 
         <Text style={styles.coffeeName}>{coffee.name}</Text>
 
-        <Text style={styles.liveScore}>
-          Score en vivo: {liveScore.toFixed(2)}
-        </Text>
-
         <Text style={styles.helperText}>
-          Selecciona descriptores de la rueda para construir el perfil sensorial
-          del café.
+          Selecciona descriptores de la rueda, califica los gustos básicos y
+          la idoneidad del café para construir su perfil sensorial completo.
         </Text>
       </View>
 
@@ -261,8 +263,8 @@ function CoffeeScoringPanel({
       {showDescriptorWarning && (
         <View style={styles.warningBox}>
           <Text style={styles.warningText}>
-            Aún no has seleccionado descriptores. El puntaje se actualizará
-            cuando selecciones al menos un atributo de sabor.
+            Aún no has seleccionado descriptores. Toca la rueda para empezar a
+            caracterizar el café.
           </Text>
         </View>
       )}
@@ -274,6 +276,38 @@ function CoffeeScoringPanel({
           onChangeIntensity={toggleDescriptor}
         />
       )}
+
+      <View style={styles.basicTastesCard}>
+        <Text style={styles.basicTastesTitle}>Gustos básicos</Text>
+
+        <RatingSlider
+          label="Dulce"
+          value={basicTastes.sweet}
+          onChange={(value) => setBasicTaste('sweet', value)}
+        />
+
+        <RatingSlider
+          label="Ácido / agrio"
+          value={basicTastes.sourAcidic}
+          onChange={(value) => setBasicTaste('sourAcidic', value)}
+        />
+
+        <RatingSlider
+          label="Amargo"
+          value={basicTastes.bitter}
+          onChange={(value) => setBasicTaste('bitter', value)}
+        />
+      </View>
+
+      <View style={styles.basicTastesCard}>
+        <Text style={styles.basicTastesTitle}>Propósito</Text>
+
+        <RatingSlider
+          label="Idoneidad (suitability)"
+          value={suitability}
+          onChange={setSuitability}
+        />
+      </View>
 
       <View style={styles.notesCard}>
         <Text style={styles.notesLabel}>Notas adicionales</Text>
@@ -389,18 +423,27 @@ const styles = StyleSheet.create({
     color: '#3D2B1F',
   },
 
-  liveScore: {
-    marginTop: 10,
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#6F4E37',
-  },
-
   helperText: {
     marginTop: 8,
     fontSize: 13,
     color: '#7A6A5C',
     lineHeight: 18,
+  },
+
+  basicTastesCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#EEE6DA',
+  },
+
+  basicTastesTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#3D2B1F',
+    marginBottom: 14,
   },
 
   infoBox: {

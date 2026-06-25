@@ -94,19 +94,5 @@ service cloud.firestore {
       allow delete: if isSignedIn() &&
         resource.data.organizationId != null;
     }
-
-    match /scoringProfiles/{profileId} {
-      allow read: if isSignedIn();
-
-      allow create: if isSignedIn() &&
-        request.resource.data.organizationId != null;
-
-      allow update: if isSignedIn() &&
-        resource.data.organizationId != null &&
-        request.resource.data.organizationId == resource.data.organizationId;
-
-      allow delete: if isSignedIn() &&
-        resource.data.organizationId != null;
-    }
   }
 }
