@@ -17,13 +17,11 @@ import {
   createSession,
   joinSessionByCode,
 } from '../src/services/sessionService';
-
 import {
   signInAsGuestTaster,
   signInMasterUser,
   registerMasterUser,
 } from '../src/services/authService';
-
 import { useAuth } from '../src/hooks/useAuth';
 import { useTheme } from '../src/theme/ThemeProvider';
 import { ThemeToggle } from '../src/components/ui/ThemeToggle';
@@ -36,13 +34,13 @@ export default function Home() {
   const { user, loading: authLoading } = useAuth();
 
   const [tab, setTab] = useState<'taster' | 'master'>('taster');
+
   const [tasterName, setTasterName] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
 
   const [masterAuthMode, setMasterAuthMode] =
     useState<MasterAuthMode>('login');
-
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [masterDisplayName, setMasterDisplayName] = useState('');
@@ -51,20 +49,14 @@ export default function Home() {
 
   const [busy, setBusy] = useState(false);
 
-  if (authLoading) {
-    return (
-      <View
-        style={[
-          styles.centeredLoading,
-          { backgroundColor: theme.colors.background },
-        ]}
-      >
-        <ActivityIndicator color={theme.colors.primarySoft} />
-      </View>
-    );
-  }
+  const actionDisabled = busy || authLoading;
 
   const handleJoinAsTaster = async () => {
+    if (authLoading) {
+      setJoinError('Estamos preparando la conexión. Intenta nuevamente en un momento.');
+      return;
+    }
+
     if (!tasterName.trim()) {
       setJoinError('Ingresa tu nombre para unirte como catador.');
       return;
@@ -99,9 +91,7 @@ export default function Home() {
       );
     } catch (err) {
       setJoinError(
-        err instanceof Error
-          ? err.message
-          : 'No se pudo unir a la sesión.'
+        err instanceof Error ? err.message : 'No se pudo unir a la sesión.'
       );
     } finally {
       setBusy(false);
@@ -109,6 +99,11 @@ export default function Home() {
   };
 
   const handleMasterAuthAndCreate = async () => {
+    if (authLoading) {
+      setAuthError('Estamos preparando la conexión. Intenta nuevamente en un momento.');
+      return;
+    }
+
     if (!email.trim()) {
       setAuthError('Ingresa tu email.');
       return;
@@ -151,9 +146,7 @@ export default function Home() {
             });
 
       const nameForSession =
-        masterUser.displayName ??
-        masterDisplayName.trim() ??
-        email.trim();
+        masterUser.displayName ?? masterDisplayName.trim() ?? email.trim();
 
       const { sessionId } = await createSession({
         name: sessionName.trim(),
@@ -218,6 +211,32 @@ export default function Home() {
           </Text>
         </View>
 
+        {authLoading && (
+          <View
+            style={[
+              styles.inlineStatus,
+              {
+                backgroundColor: theme.colors.surfaceAlt,
+                borderColor: theme.colors.border,
+              },
+            ]}
+          >
+            <ActivityIndicator
+              size="small"
+              color={theme.colors.primarySoft}
+            />
+
+            <Text
+              style={[
+                styles.inlineStatusText,
+                { color: theme.colors.textMuted },
+              ]}
+            >
+              Preparando conexión segura...
+            </Text>
+          </View>
+        )}
+
         <View
           style={[
             styles.segmentedControl,
@@ -244,9 +263,7 @@ export default function Home() {
                 styles.segmentText,
                 {
                   color:
-                    tab === 'taster'
-                      ? '#FFFFFF'
-                      : theme.colors.textMuted,
+                    tab === 'taster' ? '#FFFFFF' : theme.colors.textMuted,
                 },
               ]}
             >
@@ -271,9 +288,7 @@ export default function Home() {
                 styles.segmentText,
                 {
                   color:
-                    tab === 'master'
-                      ? '#FFFFFF'
-                      : theme.colors.textMuted,
+                    tab === 'master' ? '#FFFFFF' : theme.colors.textMuted,
                 },
               ]}
             >
@@ -359,16 +374,18 @@ export default function Home() {
                 styles.primaryButton,
                 {
                   backgroundColor: theme.colors.primary,
-                  opacity: busy ? 0.6 : 1,
+                  opacity: actionDisabled ? 0.6 : 1,
                 },
               ]}
               onPress={handleJoinAsTaster}
-              disabled={busy}
+              disabled={actionDisabled}
             >
               {busy ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.primaryButtonText}>Unirme</Text>
+                <Text style={styles.primaryButtonText}>
+                  {authLoading ? 'Preparando...' : 'Unirme'}
+                </Text>
               )}
             </Pressable>
           </View>
@@ -536,7 +553,7 @@ export default function Home() {
                   color: theme.colors.text,
                 },
               ]}
-              placeholder="Nombre de la sesión"
+              placeholder="Ej: Cata filtrados junio"
               placeholderTextColor={theme.colors.textMuted}
               value={sessionName}
               onChangeText={(text) => {
@@ -556,19 +573,21 @@ export default function Home() {
                 styles.primaryButton,
                 {
                   backgroundColor: theme.colors.primary,
-                  opacity: busy ? 0.6 : 1,
+                  opacity: actionDisabled ? 0.6 : 1,
                 },
               ]}
               onPress={handleMasterAuthAndCreate}
-              disabled={busy}
+              disabled={actionDisabled}
             >
               {busy ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <Text style={styles.primaryButtonText}>
-                  {masterAuthMode === 'register'
-                    ? 'Crear cuenta y sesión'
-                    : 'Entrar y crear sesión'}
+                  {authLoading
+                    ? 'Preparando...'
+                    : masterAuthMode === 'register'
+                      ? 'Crear cuenta y sesión'
+                      : 'Entrar y crear sesión'}
                 </Text>
               )}
             </Pressable>
@@ -592,18 +611,14 @@ function mapFirebaseAuthError(err: unknown): string {
   switch (code) {
     case 'auth/email-already-in-use':
       return 'Ya existe una cuenta con ese email. Prueba "Ya tengo cuenta".';
-
     case 'auth/invalid-credential':
     case 'auth/wrong-password':
     case 'auth/user-not-found':
       return 'Email o contraseña incorrectos.';
-
     case 'auth/weak-password':
       return 'La contraseña debe tener al menos 6 caracteres.';
-
     case 'auth/invalid-email':
       return 'El email no es válido.';
-
     default:
       return err instanceof Error
         ? err.message
@@ -615,7 +630,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
   },
-
   page: {
     flex: 1,
     width: '100%',
@@ -625,21 +639,14 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'web' ? 56 : 72,
     paddingBottom: 40,
   },
-
-  centeredLoading: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
   topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 16,
-    marginBottom: 14,
-  },
-
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'flex-start',
+  gap: 12,
+  marginBottom: 14,
+  flexWrap: 'wrap',
+},
   brandEyebrow: {
     fontSize: 13,
     fontWeight: '900',
@@ -647,38 +654,46 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 2,
   },
-
   title: {
-    fontSize: 34,
+    fontSize: 32,
     fontWeight: '900',
     letterSpacing: -1,
   },
-
   subtitle: {
     fontSize: 15,
     lineHeight: 22,
     marginBottom: 18,
   },
-
   heroCard: {
     borderWidth: 1,
     borderRadius: 28,
     padding: 20,
-    marginBottom: 18,
+    marginBottom: 12,
   },
-
   heroTitle: {
     fontSize: 22,
     fontWeight: '900',
     letterSpacing: -0.4,
     marginBottom: 6,
   },
-
   heroText: {
     fontSize: 14,
     lineHeight: 21,
   },
-
+  inlineStatus: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  inlineStatusText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
   segmentedControl: {
     flexDirection: 'row',
     borderWidth: 1,
@@ -687,38 +702,32 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     gap: 4,
   },
-
   segmentButton: {
     flex: 1,
     borderRadius: 999,
     paddingVertical: 11,
     alignItems: 'center',
   },
-
   segmentText: {
     fontSize: 13,
     fontWeight: '900',
   },
-
   card: {
     borderRadius: 28,
     padding: 18,
     borderWidth: 1,
     marginBottom: 16,
   },
-
   cardTitle: {
     fontSize: 20,
     fontWeight: '900',
     marginBottom: 6,
   },
-
   helperText: {
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 14,
   },
-
   miniSegmentedControl: {
     flexDirection: 'row',
     borderWidth: 1,
@@ -727,25 +736,21 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     gap: 4,
   },
-
   miniSegment: {
     flex: 1,
     borderRadius: 999,
     paddingVertical: 9,
     alignItems: 'center',
   },
-
   miniSegmentText: {
     fontSize: 12,
     fontWeight: '900',
   },
-
   fieldLabel: {
     fontSize: 13,
     fontWeight: '700',
     marginBottom: 6,
   },
-
   input: {
     borderWidth: 1,
     borderRadius: 18,
@@ -754,33 +759,28 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     fontSize: 15,
   },
-
   codeInput: {
     fontSize: 28,
     fontWeight: '900',
     letterSpacing: 8,
     textAlign: 'center',
   },
-
   errorText: {
     fontSize: 13,
     fontWeight: '700',
     marginBottom: 10,
   },
-
   primaryButton: {
     borderRadius: 999,
     paddingVertical: 15,
     alignItems: 'center',
     marginTop: 4,
   },
-
   primaryButtonText: {
     color: '#FFFFFF',
     fontWeight: '900',
     fontSize: 15,
   },
-
   sessionHint: {
     fontSize: 11,
     textAlign: 'center',

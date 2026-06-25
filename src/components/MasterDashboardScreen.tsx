@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -12,37 +11,108 @@ import {
   View,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   FlavorAttribute,
   SessionCoffee,
   TastingSession,
 } from '../types/domain';
-
 import {
   addCoffeeToSession,
   listenToCoffees,
   listenToSession,
 } from '../services/sessionService';
-
 import {
   getDefaultFlavorAttributes,
   getFlavorAttributesForOrg,
   indexAttributesById,
 } from '../services/flavorAttributeService';
-
 import { useCoffeeDashboard } from '../hooks/useMasterDashboard';
 import { useTheme } from '../theme/ThemeProvider';
 import { ThemeToggle } from './ui/ThemeToggle';
 import { Card } from './ui/Card';
 import { AppButton } from './ui/AppButton';
+import {
+  getFlavorColor,
+  getFlavorDisplayName,
+  shadeColor,
+  tintColor,
+} from '../data/flavorLocalization';
 
 interface Props {
   sessionId: string;
   masterId: string;
   masterName: string;
-  /** organizationId del Master, si pertenece a alguna. */
+
+  /**
+   * organizationId del Master, si pertenece a alguna.
+   * Si es null, se usan los descriptores default del sistema.
+   */
   organizationId?: string | null;
+}
+
+interface CoffeeDraftForm {
+  name: string;
+  origin: string;
+  variety: string;
+  process: string;
+  harvestDate: string;
+  description: string;
+}
+
+interface DescriptorChipData {
+  attributeId: string;
+  name: string;
+  count: number;
+  avgIntensity: number;
+}
+
+interface CategoryChipData {
+  categoryId: string;
+  name: string;
+  count: number;
+  avgIntensity: number;
+}
+
+const EMPTY_COFFEE_DRAFT: CoffeeDraftForm = {
+  name: '',
+  origin: '',
+  variety: '',
+  process: '',
+  harvestDate: '',
+  description: '',
+};
+
+function getCoffeeDraftStorageKey(sessionId: string, masterId: string): string {
+  return `ensamble:coffee-draft:${sessionId}:${masterId}`;
+}
+
+function hasDraftContent(draft: CoffeeDraftForm): boolean {
+  return Object.values(draft).some((value) => value.trim().length > 0);
+}
+
+function parseStoredDraft(value: string | null): CoffeeDraftForm {
+  if (!value) {
+    return EMPTY_COFFEE_DRAFT;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<CoffeeDraftForm>;
+
+    return {
+      name: typeof parsed.name === 'string' ? parsed.name : '',
+      origin: typeof parsed.origin === 'string' ? parsed.origin : '',
+      variety: typeof parsed.variety === 'string' ? parsed.variety : '',
+      process: typeof parsed.process === 'string' ? parsed.process : '',
+      harvestDate:
+        typeof parsed.harvestDate === 'string' ? parsed.harvestDate : '',
+      description:
+        typeof parsed.description === 'string' ? parsed.description : '',
+    };
+  } catch {
+    return EMPTY_COFFEE_DRAFT;
+  }
 }
 
 export function MasterDashboardScreen({
@@ -55,24 +125,39 @@ export function MasterDashboardScreen({
 
   const [session, setSession] = useState<TastingSession | null>(null);
   const [coffees, setCoffees] = useState<SessionCoffee[]>([]);
-  // Igual que en TasterScoringScreen: arrancamos con los defaults ya
-  // disponibles en memoria. Si hay organización, se refrescan en el efecto
-  // de abajo; si no, esto es todo lo que se necesita.
+
   const [attributes, setAttributes] = useState<FlavorAttribute[]>(
     getDefaultFlavorAttributes
   );
-  const [newCoffeeName, setNewCoffeeName] = useState('');
+
+  const [coffeeDraft, setCoffeeDraft] =
+    useState<CoffeeDraftForm>(EMPTY_COFFEE_DRAFT);
+
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [draftDirty, setDraftDirty] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle');
+
   const [addingCoffee, setAddingCoffee] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
 
+  const sessionTitle = session?.name ?? 'Sesión de cata';
+  const draftStorageKey = useMemo(
+    () => getCoffeeDraftStorageKey(sessionId, masterId),
+    [sessionId, masterId]
+  );
+
   useEffect(() => {
     const unsubscribe = listenToSession(sessionId, setSession);
+
     return unsubscribe;
   }, [sessionId]);
 
   useEffect(() => {
     const unsubscribe = listenToCoffees(sessionId, setCoffees);
+
     return unsubscribe;
   }, [sessionId]);
 
@@ -86,13 +171,102 @@ export function MasterDashboardScreen({
       });
   }, [organizationId]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadLocalDraft() {
+      try {
+        const storedValue = await AsyncStorage.getItem(draftStorageKey);
+        const storedDraft = parseStoredDraft(storedValue);
+
+        if (!mounted) return;
+
+        setCoffeeDraft(storedDraft);
+        setDraftStatus(hasDraftContent(storedDraft) ? 'saved' : 'idle');
+      } catch (err) {
+        console.warn('No se pudo cargar el borrador local:', err);
+
+        if (!mounted) return;
+
+        setDraftStatus('error');
+      } finally {
+        if (mounted) {
+          setDraftDirty(false);
+          setDraftLoaded(true);
+        }
+      }
+    }
+
+    setDraftLoaded(false);
+    setDraftDirty(false);
+    loadLocalDraft();
+
+    return () => {
+      mounted = false;
+    };
+  }, [draftStorageKey]);
+
+  useEffect(() => {
+    if (!draftLoaded || !draftDirty) return;
+
+    const timeoutId = setTimeout(() => {
+      async function persistLocalDraft() {
+        try {
+          if (!hasDraftContent(coffeeDraft)) {
+            await AsyncStorage.removeItem(draftStorageKey);
+            setDraftStatus('idle');
+            return;
+          }
+
+          setDraftStatus('saving');
+
+          await AsyncStorage.setItem(
+            draftStorageKey,
+            JSON.stringify(coffeeDraft)
+          );
+
+          setDraftStatus('saved');
+        } catch (err) {
+          console.warn('No se pudo guardar el borrador local:', err);
+          setDraftStatus('error');
+        }
+      }
+
+      persistLocalDraft();
+    }, 450);
+
+    return () => clearTimeout(timeoutId);
+  }, [coffeeDraft, draftDirty, draftLoaded, draftStorageKey]);
+
   const attributesById = useMemo(
     () => indexAttributesById(attributes),
     [attributes]
   );
 
+  const updateCoffeeDraftField = (
+    field: keyof CoffeeDraftForm,
+    value: string
+  ) => {
+    setCoffeeDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setDraftDirty(true);
+
+    if (error) {
+      setError(null);
+    }
+  };
+
+  const clearLocalDraft = async () => {
+    await AsyncStorage.removeItem(draftStorageKey);
+    setCoffeeDraft(EMPTY_COFFEE_DRAFT);
+    setDraftDirty(false);
+    setDraftStatus('idle');
+  };
+
   const handleAddCoffee = async () => {
-    if (!newCoffeeName.trim()) {
+    if (!coffeeDraft.name.trim()) {
       setError('Ingresa el nombre del café antes de agregarlo.');
       return;
     }
@@ -105,17 +279,21 @@ export function MasterDashboardScreen({
 
       await addCoffeeToSession({
         sessionId,
-        name: newCoffeeName.trim(),
+        name: coffeeDraft.name,
+        origin: coffeeDraft.origin,
+        variety: coffeeDraft.variety,
+        process: coffeeDraft.process,
+        harvestDate: coffeeDraft.harvestDate,
+        description: coffeeDraft.description,
+        sessionName: sessionTitle,
         tableLabel,
         order: coffees.length,
       });
 
-      setNewCoffeeName('');
+      await clearLocalDraft();
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : 'No se pudo agregar el café.'
+        err instanceof Error ? err.message : 'No se pudo agregar el café.'
       );
     } finally {
       setAddingCoffee(false);
@@ -140,7 +318,14 @@ export function MasterDashboardScreen({
     }
   };
 
-  const sessionTitle = session?.name ?? 'Sesión de cata';
+  const draftStatusLabel =
+    draftStatus === 'saving'
+      ? 'Guardando borrador local...'
+      : draftStatus === 'saved'
+        ? 'Borrador guardado en este dispositivo'
+        : draftStatus === 'error'
+          ? 'No se pudo guardar el borrador local'
+          : 'El borrador se guardará localmente en este dispositivo.';
 
   return (
     <View
@@ -174,7 +359,7 @@ export function MasterDashboardScreen({
         </View>
 
         {session && (
-          <Card elevated style={styles.joinCard}>
+          <Card style={styles.joinCard} elevated>
             <Text
               style={[
                 styles.joinCodeLabel,
@@ -186,18 +371,12 @@ export function MasterDashboardScreen({
               Código para unirse
             </Text>
 
-            <Pressable
-              onPress={handleCopyJoinCode}
-              style={styles.joinCodeRow}
-              accessibilityRole="button"
-              accessibilityLabel="Copiar código de sesión"
-            >
+            <Pressable style={styles.joinCodeRow} onPress={handleCopyJoinCode}>
               <Text
-                selectable
                 style={[
                   styles.joinCodeValue,
                   {
-                    color: theme.colors.text,
+                    color: theme.colors.primary,
                   },
                 ]}
               >
@@ -208,7 +387,9 @@ export function MasterDashboardScreen({
                 style={[
                   styles.copyIcon,
                   {
-                    color: theme.colors.primarySoft,
+                    color: codeCopied
+                      ? theme.colors.success
+                      : theme.colors.textMuted,
                   },
                 ]}
               >
@@ -220,7 +401,7 @@ export function MasterDashboardScreen({
               style={[
                 styles.joinCodeHint,
                 {
-                  color: codeCopied ? theme.colors.success : theme.colors.textMuted,
+                  color: theme.colors.textMuted,
                 },
               ]}
             >
@@ -232,15 +413,8 @@ export function MasterDashboardScreen({
         )}
 
         <View style={styles.kpiGrid}>
-          <DashboardKpi
-            label="Cafés"
-            value={coffees.length}
-          />
-
-          <DashboardKpi
-            label="Modo"
-            value={session?.isBlind ? 'Ciego' : 'Visible'}
-          />
+          <DashboardKpi label="Cafés" value={coffees.length} />
+          <DashboardKpi label="Estado" value={session?.status ?? '—'} />
         </View>
 
         <Card style={styles.addCard}>
@@ -249,37 +423,93 @@ export function MasterDashboardScreen({
           </Text>
 
           <Text style={[styles.cardHint, { color: theme.colors.textMuted }]}>
-            Añade las muestras que serán evaluadas por los catadores.
+            Carga la información de la muestra. Si sales del dashboard antes de
+            agregarla, el borrador se restaurará en este mismo dispositivo.
           </Text>
 
-          <View style={styles.addCoffeeRow}>
-            <TextInput
-              style={[
-                styles.addCoffeeInput,
-                {
-                  backgroundColor: theme.colors.surfaceAlt,
-                  borderColor: theme.colors.border,
-                  color: theme.colors.text,
-                },
-              ]}
-              placeholder="Ej. Honduras Marcala"
-              placeholderTextColor={theme.colors.textMuted}
-              value={newCoffeeName}
-              onChangeText={(text) => {
-                setNewCoffeeName(text);
-                if (error) setError(null);
-              }}
-              onSubmitEditing={handleAddCoffee}
-              returnKeyType="done"
+          <View style={styles.formGrid}>
+            <DraftInput
+              label="Nombre del café *"
+              placeholder="Ej: Colombia La Esperanza"
+              value={coffeeDraft.name}
+              onChangeText={(value) => updateCoffeeDraftField('name', value)}
             />
 
-            <AppButton
-              title="Agregar"
-              onPress={handleAddCoffee}
-              busy={addingCoffee}
-              disabled={addingCoffee}
-              style={styles.addButton}
+            <DraftInput
+              label="Origen"
+              placeholder="Ej: Huila, Colombia"
+              value={coffeeDraft.origin}
+              onChangeText={(value) => updateCoffeeDraftField('origin', value)}
             />
+
+            <DraftInput
+              label="Variedad / cultivar"
+              placeholder="Ej: Caturra, Bourbon rosado"
+              value={coffeeDraft.variety}
+              onChangeText={(value) => updateCoffeeDraftField('variety', value)}
+            />
+
+            <DraftInput
+              label="Proceso"
+              placeholder="Ej: Lavado, natural, honey"
+              value={coffeeDraft.process}
+              onChangeText={(value) => updateCoffeeDraftField('process', value)}
+            />
+
+            <DraftInput
+              label="Fecha de cosecha"
+              placeholder="Ej: 2025 / 2025-2026"
+              value={coffeeDraft.harvestDate}
+              onChangeText={(value) =>
+                updateCoffeeDraftField('harvestDate', value)
+              }
+            />
+          </View>
+
+          <DraftInput
+            label="Descripción"
+            placeholder="Notas internas, objetivo de la muestra o información del productor."
+            value={coffeeDraft.description}
+            onChangeText={(value) =>
+              updateCoffeeDraftField('description', value)
+            }
+            multiline
+          />
+
+          <View style={styles.formFooter}>
+            <Text
+              style={[
+                styles.draftStatus,
+                {
+                  color:
+                    draftStatus === 'error'
+                      ? theme.colors.danger
+                      : theme.colors.textMuted,
+                },
+              ]}
+            >
+              {draftStatusLabel}
+            </Text>
+
+            <View style={styles.formActions}>
+              {hasDraftContent(coffeeDraft) && (
+                <AppButton
+                  title="Limpiar"
+                  variant="secondary"
+                  onPress={clearLocalDraft}
+                  disabled={addingCoffee}
+                  style={styles.clearDraftButton}
+                />
+              )}
+
+              <AppButton
+                title="Agregar café"
+                onPress={handleAddCoffee}
+                busy={addingCoffee}
+                disabled={addingCoffee}
+                style={styles.addButton}
+              />
+            </View>
           </View>
 
           {error && (
@@ -289,14 +519,16 @@ export function MasterDashboardScreen({
           )}
         </Card>
 
-        <View style={styles.actionsRow}>
-          <AppButton
-            title="🖨️ Imprimir resultados"
-            onPress={handlePrint}
-            variant="secondary"
-            style={styles.printButton}
-          />
-        </View>
+        {Platform.OS === 'web' && (
+          <View style={styles.actionsRow}>
+            <AppButton
+              title="Imprimir / PDF"
+              variant="secondary"
+              onPress={handlePrint}
+              style={styles.printButton}
+            />
+          </View>
+        )}
 
         <View style={styles.printArea}>
           {coffees.length === 0 ? (
@@ -333,6 +565,48 @@ export function MasterDashboardScreen({
   );
 }
 
+function DraftInput({
+  label,
+  placeholder,
+  value,
+  onChangeText,
+  multiline = false,
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  multiline?: boolean;
+}) {
+  const { theme } = useTheme();
+
+  return (
+    <View style={[styles.inputGroup, multiline && styles.inputGroupFull]}>
+      <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
+        {label}
+      </Text>
+
+      <TextInput
+        style={[
+          styles.input,
+          multiline && styles.textArea,
+          {
+            backgroundColor: theme.colors.surfaceAlt,
+            borderColor: theme.colors.border,
+            color: theme.colors.text,
+          },
+        ]}
+        placeholder={placeholder}
+        placeholderTextColor={theme.colors.textMuted}
+        value={value}
+        onChangeText={onChangeText}
+        multiline={multiline}
+        textAlignVertical={multiline ? 'top' : 'center'}
+      />
+    </View>
+  );
+}
+
 function DashboardKpi({
   label,
   value,
@@ -365,6 +639,7 @@ function CoffeeResultCard({
   attributesById: Record<string, FlavorAttribute>;
 }) {
   const { theme } = useTheme();
+
   const { result, kpis, rawProfiles } = useCoffeeDashboard(
     sessionId,
     coffee,
@@ -372,24 +647,68 @@ function CoffeeResultCard({
   );
 
   if (!result) {
-    return (
-      <Card style={styles.resultCard}>
-        <ActivityIndicator color={theme.colors.primarySoft} />
-      </Card>
-    );
+    return null;
   }
 
+  const coffeeMeta = [
+    coffee.origin ? `Origen: ${coffee.origin}` : null,
+    coffee.variety ? `Variedad: ${coffee.variety}` : null,
+    coffee.process ? `Proceso: ${coffee.process}` : null,
+    coffee.harvestDate ? `Cosecha: ${coffee.harvestDate}` : null,
+  ].filter(Boolean);
+
   return (
-    <Card elevated style={styles.resultCard}>
+    <Card style={styles.resultCard} elevated>
       <View style={styles.resultHeaderRow}>
         <View style={styles.resultHeaderText}>
-          <Text style={[styles.sampleLabel, { color: theme.colors.accent }]}>
+          <Text style={[styles.sampleLabel, { color: theme.colors.textMuted }]}>
             Muestra #{result.tableLabel}
           </Text>
 
           <Text style={[styles.resultCoffeeName, { color: theme.colors.text }]}>
             {result.coffeeName}
           </Text>
+
+          {coffeeMeta.length > 0 && (
+            <View style={styles.coffeeMetaWrap}>
+              {coffeeMeta.map((item) => (
+                <View
+                  key={item}
+                  style={[
+                    styles.coffeeMetaChip,
+                    {
+                      backgroundColor: theme.colors.surfaceAlt,
+                      borderColor: theme.colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.coffeeMetaText,
+                      {
+                        color: theme.colors.textMuted,
+                      },
+                    ]}
+                  >
+                    {item}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {coffee.description && (
+            <Text
+              style={[
+                styles.coffeeDescription,
+                {
+                  color: theme.colors.textMuted,
+                },
+              ]}
+            >
+              {coffee.description}
+            </Text>
+          )}
         </View>
 
         <View
@@ -401,47 +720,36 @@ function CoffeeResultCard({
             },
           ]}
         >
-          <Text style={[styles.scorePillLabel, { color: theme.colors.textMuted }]}>
+          <Text
+            style={[
+              styles.scorePillLabel,
+              {
+                color: theme.colors.textMuted,
+              },
+            ]}
+          >
             Idoneidad
           </Text>
 
-          <Text style={[styles.scorePillValue, { color: theme.colors.primarySoft }]}>
+          <Text
+            style={[
+              styles.scorePillValue,
+              {
+                color: theme.colors.primary,
+              },
+            ]}
+          >
             {kpis.totalTasters > 0 ? result.averageSuitability.toFixed(1) : '—'}
           </Text>
         </View>
       </View>
 
       <View style={styles.innerKpiRow}>
+        <MiniMetric label="Catadores" value={kpis.totalTasters} />
+        <MiniMetric label="Menciones" value={kpis.totalDescriptorMentions} />
         <MiniMetric
-          label="Catadores"
-          value={kpis.totalTasters}
-        />
-
-        <MiniMetric
-          label="Menciones"
-          value={kpis.totalDescriptorMentions}
-        />
-
-        <MiniMetric
-          label="Desc./catador"
-          value={kpis.averageDescriptorsPerTaster}
-        />
-      </View>
-
-      <View style={styles.innerKpiRow}>
-        <MiniMetric
-          label="Dulce"
-          value={result.basicTastesAverage.sweet.toFixed(1)}
-        />
-
-        <MiniMetric
-          label="Ácido"
-          value={result.basicTastesAverage.sourAcidic.toFixed(1)}
-        />
-
-        <MiniMetric
-          label="Amargo"
-          value={result.basicTastesAverage.bitter.toFixed(1)}
+          label="Desc. / catador"
+          value={kpis.averageDescriptorsPerTaster.toFixed(1)}
         />
       </View>
 
@@ -461,7 +769,7 @@ function CoffeeResultCard({
               style={[
                 styles.tasterRow,
                 {
-                  borderColor: theme.colors.border,
+                  borderTopColor: theme.colors.border,
                 },
               ]}
             >
@@ -473,7 +781,7 @@ function CoffeeResultCard({
                 style={[
                   styles.tasterScore,
                   {
-                    color: theme.colors.primarySoft,
+                    color: theme.colors.textMuted,
                   },
                 ]}
               >
@@ -482,6 +790,29 @@ function CoffeeResultCard({
               </Text>
             </View>
           ))
+        )}
+      </View>
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>
+          Familias sensoriales
+        </Text>
+
+        {result.categorySummary.length === 0 ? (
+          <Text style={[styles.mutedText, { color: theme.colors.textMuted }]}>
+            Todavía no hay familias sensoriales predominantes.
+          </Text>
+        ) : (
+          <View style={styles.categoryGrid}>
+            {result.categorySummary.map((category, index) => (
+              <CategorySummaryChip
+                key={category.categoryId}
+                category={category}
+                attributesById={attributesById}
+                fallbackIndex={index}
+              />
+            ))}
+          </View>
         )}
       </View>
 
@@ -496,39 +827,13 @@ function CoffeeResultCard({
           </Text>
         ) : (
           <View style={styles.descriptorGrid}>
-            {result.topDescriptors.map((descriptor) => (
-              <View
+            {result.topDescriptors.map((descriptor, index) => (
+              <DescriptorSummaryChip
                 key={descriptor.attributeId}
-                style={[
-                  styles.descriptorChip,
-                  {
-                    backgroundColor: theme.colors.surfaceAlt,
-                    borderColor: theme.colors.border,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.descriptorName,
-                    {
-                      color: theme.colors.text,
-                    },
-                  ]}
-                >
-                  {descriptor.name}
-                </Text>
-
-                <Text
-                  style={[
-                    styles.descriptorMeta,
-                    {
-                      color: theme.colors.textMuted,
-                    },
-                  ]}
-                >
-                  {descriptor.count}x · intensidad {descriptor.avgIntensity.toFixed(1)}
-                </Text>
-              </View>
+                descriptor={descriptor}
+                attributesById={attributesById}
+                fallbackIndex={index}
+              />
             ))}
           </View>
         )}
@@ -567,15 +872,172 @@ function MiniMetric({
   );
 }
 
+function DescriptorSummaryChip({
+  descriptor,
+  attributesById,
+  fallbackIndex,
+}: {
+  descriptor: DescriptorChipData;
+  attributesById: Record<string, FlavorAttribute>;
+  fallbackIndex: number;
+}) {
+  const { theme } = useTheme();
+
+  const attribute = attributesById[descriptor.attributeId] ?? null;
+  const lineage = attribute
+    ? getLineageForAttribute(attribute, attributesById)
+    : [];
+  const color = attribute
+    ? getFlavorColor(attribute, lineage, fallbackIndex)
+    : theme.colors.primary;
+
+  const displayName = attribute
+    ? getFlavorDisplayName(attribute)
+    : descriptor.name;
+
+  return (
+    <View
+      style={[
+        styles.descriptorChip,
+        {
+          backgroundColor: tintColor(color, 0.82),
+          borderColor: tintColor(color, 0.5),
+        },
+      ]}
+    >
+      <View style={styles.descriptorChipHeader}>
+        <View
+          style={[
+            styles.descriptorDot,
+            {
+              backgroundColor: color,
+            },
+          ]}
+        />
+
+        <Text
+          style={[
+            styles.descriptorName,
+            {
+              color: shadeColor(color, 0.38),
+            },
+          ]}
+        >
+          {displayName}
+        </Text>
+      </View>
+
+      <Text
+        style={[
+          styles.descriptorMeta,
+          {
+            color: shadeColor(color, 0.25),
+          },
+        ]}
+      >
+        {descriptor.count}x · intensidad {descriptor.avgIntensity.toFixed(1)}
+      </Text>
+    </View>
+  );
+}
+
+function CategorySummaryChip({
+  category,
+  attributesById,
+  fallbackIndex,
+}: {
+  category: CategoryChipData;
+  attributesById: Record<string, FlavorAttribute>;
+  fallbackIndex: number;
+}) {
+  const { theme } = useTheme();
+
+  const attribute = attributesById[category.categoryId] ?? null;
+  const lineage = attribute
+    ? getLineageForAttribute(attribute, attributesById)
+    : [];
+  const color = attribute
+    ? getFlavorColor(attribute, lineage, fallbackIndex)
+    : theme.colors.accent;
+
+  const displayName = attribute
+    ? getFlavorDisplayName(attribute)
+    : category.name;
+
+  return (
+    <View
+      style={[
+        styles.categoryChip,
+        {
+          backgroundColor: tintColor(color, 0.84),
+          borderColor: tintColor(color, 0.52),
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.categoryDot,
+          {
+            backgroundColor: color,
+          },
+        ]}
+      />
+
+      <View style={styles.categoryTextBlock}>
+        <Text
+          style={[
+            styles.categoryName,
+            {
+              color: shadeColor(color, 0.4),
+            },
+          ]}
+        >
+          {displayName}
+        </Text>
+
+        <Text
+          style={[
+            styles.categoryMeta,
+            {
+              color: shadeColor(color, 0.24),
+            },
+          ]}
+        >
+          {category.count} menciones · int. {category.avgIntensity.toFixed(1)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function getLineageForAttribute(
+  attr: FlavorAttribute,
+  attributesById: Record<string, FlavorAttribute>
+): FlavorAttribute[] {
+  const lineage: FlavorAttribute[] = [];
+  const visitedIds = new Set<string>();
+
+  let cursor: FlavorAttribute | null = attr;
+
+  while (cursor && !visitedIds.has(cursor.id)) {
+    lineage.unshift(cursor);
+    visitedIds.add(cursor.id);
+
+    cursor = cursor.parentId
+      ? attributesById[cursor.parentId] ?? null
+      : null;
+  }
+
+  return lineage;
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-
   scroll: {
     flex: 1,
   },
-
   content: {
     width: '100%',
     maxWidth: 980,
@@ -584,19 +1046,18 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'web' ? 48 : 28,
     paddingBottom: 48,
   },
-
   topBar: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 16,
+    gap: 12,
     marginBottom: 18,
+    flexWrap: 'wrap',
   },
-
   titleBlock: {
     flex: 1,
+    minWidth: 0,
   },
-
   eyebrow: {
     fontSize: 12,
     fontWeight: '900',
@@ -604,161 +1065,171 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 4,
   },
-
   title: {
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: '900',
     letterSpacing: -0.8,
   },
-
   subtitle: {
     marginTop: 4,
     fontSize: 14,
     fontWeight: '600',
   },
-
   joinCard: {
     alignItems: 'center',
     marginBottom: 16,
   },
-
   joinCodeLabel: {
     fontSize: 12,
     fontWeight: '900',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
-
   joinCodeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-
   joinCodeValue: {
     fontSize: 44,
     fontWeight: '900',
     letterSpacing: 10,
     marginVertical: 4,
   },
-
   copyIcon: {
     fontSize: 20,
     fontWeight: '900',
   },
-
   joinCodeHint: {
     fontSize: 12,
     textAlign: 'center',
     lineHeight: 18,
   },
-
   kpiGrid: {
     flexDirection: 'row',
     gap: 10,
     marginBottom: 14,
   },
-
   kpiCard: {
     flex: 1,
   },
-
   kpiLabel: {
     fontSize: 12,
     fontWeight: '800',
     textTransform: 'uppercase',
   },
-
   kpiValue: {
     fontSize: 24,
     fontWeight: '900',
     marginTop: 2,
   },
-
   addCard: {
     marginBottom: 14,
   },
-
   cardTitle: {
     fontSize: 18,
     fontWeight: '900',
     marginBottom: 4,
   },
-
   cardHint: {
     fontSize: 13,
     lineHeight: 18,
-    marginBottom: 12,
+    marginBottom: 14,
   },
-
-  addCoffeeRow: {
+  formGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
   },
-
-  addCoffeeInput: {
+  inputGroup: {
     flex: 1,
+    minWidth: 230,
+    marginBottom: 12,
+  },
+  inputGroupFull: {
+    minWidth: '100%',
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '900',
+    marginBottom: 6,
+  },
+  input: {
     minHeight: 48,
     borderWidth: 1,
     borderRadius: 18,
     paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 15,
   },
-
-  addButton: {
-    minWidth: 116,
+  textArea: {
+    minHeight: 96,
   },
-
+  formFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  draftStatus: {
+    flex: 1,
+    minWidth: 180,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  formActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  clearDraftButton: {
+    minWidth: 96,
+  },
+  addButton: {
+    minWidth: 132,
+  },
   errorText: {
     marginTop: 10,
     fontSize: 13,
     fontWeight: '700',
   },
-
   actionsRow: {
     marginBottom: 16,
     alignItems: 'flex-start',
   },
-
   printButton: {
     alignSelf: 'flex-start',
   },
-
   printArea: {
     flex: 1,
   },
-
   emptyCard: {
     alignItems: 'center',
   },
-
   emptyTitle: {
     fontSize: 20,
     fontWeight: '900',
     marginBottom: 6,
   },
-
   emptyText: {
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
   },
-
   resultCard: {
     marginBottom: 16,
   },
-
   resultHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 12,
     marginBottom: 14,
   },
-
   resultHeaderText: {
     flex: 1,
   },
-
   sampleLabel: {
     fontSize: 12,
     fontWeight: '900',
@@ -766,13 +1237,32 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: 3,
   },
-
   resultCoffeeName: {
     fontSize: 22,
     fontWeight: '900',
     letterSpacing: -0.4,
   },
-
+  coffeeMetaWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  coffeeMetaChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  coffeeMetaText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  coffeeDescription: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 10,
+  },
   scorePill: {
     borderWidth: 1,
     borderRadius: 20,
@@ -781,25 +1271,21 @@ const styles = StyleSheet.create({
     minWidth: 94,
     alignItems: 'center',
   },
-
   scorePillLabel: {
     fontSize: 10,
     fontWeight: '900',
     textTransform: 'uppercase',
   },
-
   scorePillValue: {
     fontSize: 20,
     fontWeight: '900',
     marginTop: 1,
   },
-
   innerKpiRow: {
     flexDirection: 'row',
     gap: 8,
     marginBottom: 14,
   },
-
   miniMetric: {
     flex: 1,
     borderWidth: 1,
@@ -808,12 +1294,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     alignItems: 'center',
   },
-
   miniMetricValue: {
     fontSize: 18,
     fontWeight: '900',
   },
-
   miniMetricLabel: {
     fontSize: 10,
     fontWeight: '800',
@@ -821,11 +1305,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textAlign: 'center',
   },
-
   section: {
-    marginTop: 8,
+    marginTop: 12,
   },
-
   sectionLabel: {
     fontSize: 12,
     fontWeight: '900',
@@ -833,12 +1315,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     letterSpacing: 0.6,
   },
-
   mutedText: {
     fontSize: 13,
     lineHeight: 19,
   },
-
   tasterRow: {
     borderTopWidth: 1,
     paddingVertical: 9,
@@ -846,38 +1326,74 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
-
   tasterName: {
     fontSize: 14,
     fontWeight: '700',
   },
-
   tasterScore: {
     fontSize: 14,
     fontWeight: '900',
   },
-
+  categoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  categoryChip: {
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 150,
+  },
+  categoryDot: {
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+  },
+  categoryTextBlock: {
+    flex: 1,
+  },
+  categoryName: {
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  categoryMeta: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+  },
   descriptorGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-
   descriptorChip: {
     borderWidth: 1,
     borderRadius: 18,
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
-
+  descriptorChipHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  descriptorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
   descriptorName: {
     fontSize: 13,
     fontWeight: '900',
   },
-
   descriptorMeta: {
     fontSize: 11,
     fontWeight: '700',
-    marginTop: 2,
+    marginTop: 4,
   },
 });

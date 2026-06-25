@@ -9,39 +9,44 @@ export type Polarity = 'positive' | 'negative' | 'neutral';
 /**
  * Un atributo de sabor / descriptor seleccionable en la rueda.
  * Puede ser global (organizationId === null) o propio de una organización.
- * La jerarquía (parentId) permite construir la rueda de adentro hacia afuera,
- * igual que en Coffee Rose: categorías generales en el centro, específicas en el borde.
+ *
+ * La jerarquía (parentId) permite construir la rueda de adentro hacia afuera.
  */
 export interface FlavorAttribute {
   id: string;
-  organizationId: string | null; // null = atributo default del sistema
+  organizationId: string | null;
   name: string;
-  parentId: string | null; // null = nodo raíz del wheel
+  parentId: string | null;
   polarity: Polarity;
-  defaultWeight: number; // peso usado por el motor de scoring si el profile no lo sobreescribe
+  defaultWeight: number;
   createdAt: number;
 }
 
 /**
- * Selección concreta que hace un catador: qué atributo eligió y con qué intensidad.
+ * Selección concreta que hace un catador: qué atributo eligió y con qué
+ * intensidad.
  */
 export interface DescriptorSelection {
   attributeId: string;
-  intensity: number; // normalmente 1-5 o 1-10, lo define la rueda en uso
+  intensity: number;
 }
 
 /**
- * Los tres gustos básicos que se evalúan de forma independiente a la rueda
- * de aromas, igual que en las hojas de cata estilo SCA: cada uno con su
- * propia escala de intensidad (0-9), sin jerarquía ni sub-descriptores.
+ * Los tres gustos básicos que se evalúan de forma independiente a la rueda.
  */
 export type BasicTasteKey = 'sweet' | 'sourAcidic' | 'bitter';
 
 export type BasicTasteRatings = Record<BasicTasteKey, number>;
 
-export const BASIC_TASTE_SCALE = { min: 0, max: 9 };
+export const BASIC_TASTE_SCALE = {
+  min: 0,
+  max: 9,
+};
 
-export const SUITABILITY_SCALE = { min: 0, max: 9 };
+export const SUITABILITY_SCALE = {
+  min: 0,
+  max: 9,
+};
 
 export interface Organization {
   id: string;
@@ -59,8 +64,7 @@ export interface AppUser {
 export type SessionStatus = 'open' | 'closed';
 
 /**
- * Una sesión de catación (= "flight" en la terminología de Coffee Rose).
- * Tiene un master que la crea y controla, y N participantes (tasters).
+ * Una sesión de catación.
  */
 export interface TastingSession {
   id: string;
@@ -69,6 +73,7 @@ export interface TastingSession {
   status: SessionStatus;
   joinCode: string;
   isBlind: boolean;
+  hideNamesFromMaster?: boolean;
   createdAt: number;
   closedAt?: number;
 }
@@ -82,6 +87,9 @@ export interface SessionParticipant {
 
 /**
  * Un café dentro de una sesión.
+ *
+ * Los campos nuevos son opcionales para mantener compatibilidad con cafés
+ * creados antes de agregar trazabilidad.
  */
 export interface SessionCoffee {
   id: string;
@@ -90,14 +98,19 @@ export interface SessionCoffee {
   tableLabel: string;
   order: number;
   createdAt: number;
+
+  masterId?: string;
+  sessionName?: string;
+
+  origin?: string;
+  variety?: string;
+  process?: string;
+  harvestDate?: string;
+  description?: string;
 }
 
 /**
- * La caracterización sensorial que hace UN catador para UN café dentro de
- * una sesión: qué descriptores de aroma marcó (con su intensidad), cómo
- * calificó los gustos básicos, qué tan adecuado le pareció el café para su
- * propósito (suitability), y sus notas libres. No hay un puntaje calculado:
- * el objetivo es categorizar y describir, no puntuar.
+ * La caracterización sensorial que hace UN catador para UN café.
  */
 export interface TasterProfile {
   userId: string;
@@ -112,15 +125,12 @@ export interface TasterProfile {
 }
 
 /**
- * Resultado agregado que ve el Master en el dashboard: no es un promedio de
- * puntaje, sino un consenso de qué tan presente está cada descriptor /
- * categoría / gusto básico entre los catadores que evaluaron el café.
+ * Resultado agregado que ve el Master en el dashboard.
  */
 export interface AggregatedCoffeeResult {
   coffeeId: string;
   coffeeName: string;
   tableLabel: string;
-
   totalTasters: number;
 
   topDescriptors: {
@@ -144,6 +154,5 @@ export interface AggregatedCoffeeResult {
   }[];
 
   basicTastesAverage: BasicTasteRatings;
-
   averageSuitability: number;
 }

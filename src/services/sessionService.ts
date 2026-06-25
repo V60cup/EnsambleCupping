@@ -6,20 +6,18 @@ import {
   doc,
   getDoc,
   onSnapshot,
+  orderBy,
+  query,
   setDoc,
   updateDoc,
-  query,
-  orderBy,
 } from 'firebase/firestore';
 
 import { auth, db } from '../config/firebase';
-
 import {
   Role,
   SessionCoffee,
   TastingSession,
 } from '../types/domain';
-
 import {
   generateUniqueJoinCode,
   releaseJoinCode,
@@ -38,9 +36,16 @@ function getCurrentUserId(): string {
   return uid;
 }
 
-async function assertCurrentUserIsSessionMaster(sessionId: string): Promise<void> {
-  const currentUserId = getCurrentUserId();
+function normalizeOptionalText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
 
+  return trimmed ? trimmed : undefined;
+}
+
+async function assertCurrentUserIsSessionMaster(
+  sessionId: string
+): Promise<TastingSession> {
+  const currentUserId = getCurrentUserId();
   const sessionRef = doc(db, 'sessions', sessionId);
   const sessionSnap = await getDoc(sessionRef);
 
@@ -48,17 +53,22 @@ async function assertCurrentUserIsSessionMaster(sessionId: string): Promise<void
     throw new Error('La sesión no existe.');
   }
 
-  const session = sessionSnap.data() as TastingSession;
+  const session = {
+    id: sessionSnap.id,
+    ...sessionSnap.data(),
+  } as TastingSession;
 
   if (session.masterId !== currentUserId) {
     throw new Error(
       `El usuario actual no es el master de esta sesión. masterId=${session.masterId}, currentUser=${currentUserId}`
     );
   }
+
+  return session;
 }
 
 /**
- * Crear sesión
+ * Crear sesión.
  */
 export async function createSession(args: {
   name: string;
@@ -72,7 +82,9 @@ export async function createSession(args: {
     name: args.name,
     masterId: currentUserId,
     status: 'open',
+    joinCode: '',
     isBlind: args.isBlind,
+    hideNamesFromMaster: false,
     createdAt: Date.now(),
   });
 
@@ -88,21 +100,18 @@ export async function createSession(args: {
     console.error('Error generando joinCode para la sesión:', err);
   }
 
-  await setDoc(
-    doc(db, 'sessions', sessionId, 'participants', currentUserId),
-    {
-      userId: currentUserId,
-      displayName: args.masterDisplayName,
-      role: 'master' as Role,
-      joinedAt: Date.now(),
-    }
-  );
+  await setDoc(doc(db, 'sessions', sessionId, 'participants', currentUserId), {
+    userId: currentUserId,
+    displayName: args.masterDisplayName,
+    role: 'master' as Role,
+    joinedAt: Date.now(),
+  });
 
   return { sessionId };
 }
 
 /**
- * Unirse mediante código
+ * Unirse mediante código.
  */
 export async function joinSessionByCode(args: {
   joinCode: string;
@@ -110,71 +119,72 @@ export async function joinSessionByCode(args: {
   displayName: string;
 }): Promise<{ sessionId: string }> {
   const currentUserId = getCurrentUserId();
-
   const sessionId = await resolveJoinCode(args.joinCode);
 
   if (!sessionId) {
     throw new Error('El código de sesión no existe o ya expiró.');
   }
 
-  await setDoc(
-    doc(db, 'sessions', sessionId, 'participants', currentUserId),
-    {
-      userId: currentUserId,
-      displayName: args.displayName,
-      role: 'taster' as Role,
-      joinedAt: Date.now(),
-    }
-  );
+  await setDoc(doc(db, 'sessions', sessionId, 'participants', currentUserId), {
+    userId: currentUserId,
+    displayName: args.displayName,
+    role: 'taster' as Role,
+    joinedAt: Date.now(),
+  });
 
   return { sessionId };
 }
 
 /**
- * Agregar café
+ * Agregar café definitivo a la sesión.
+ *
+ * Aquí sí usamos Firestore porque el café ya dejó de ser borrador y pasa a ser
+ * parte real de la sesión.
  */
 export async function addCoffeeToSession(args: {
   sessionId: string;
   name: string;
   tableLabel?: string;
   order?: number;
+  origin?: string;
+  variety?: string;
+  process?: string;
+  harvestDate?: string;
+  description?: string;
+  sessionName?: string;
 }): Promise<string> {
-  await assertCurrentUserIsSessionMaster(args.sessionId);
+  const session = await assertCurrentUserIsSessionMaster(args.sessionId);
+  const currentUserId = getCurrentUserId();
 
-  const coffeesCol = collection(
-    db,
-    'sessions',
-    args.sessionId,
-    'coffees'
-  );
+  const coffeesCol = collection(db, 'sessions', args.sessionId, 'coffees');
 
   const ref = await addDoc(coffeesCol, {
     sessionId: args.sessionId,
-    name: args.name,
-    tableLabel:
-      args.tableLabel ??
-      `Muestra-${Date.now().toString().slice(-4)}`,
+    masterId: currentUserId,
+    sessionName: args.sessionName ?? session.name,
+    name: args.name.trim(),
+    tableLabel: args.tableLabel ?? `Muestra-${Date.now().toString().slice(-4)}`,
     order: args.order ?? Date.now(),
     createdAt: Date.now(),
+
+    origin: normalizeOptionalText(args.origin),
+    variety: normalizeOptionalText(args.variety),
+    process: normalizeOptionalText(args.process),
+    harvestDate: normalizeOptionalText(args.harvestDate),
+    description: normalizeOptionalText(args.description),
   });
 
   return ref.id;
 }
 
 /**
- * Listener de cafés
+ * Listener de cafés de una sesión.
  */
 export function listenToCoffees(
   sessionId: string,
   callback: (coffees: SessionCoffee[]) => void
 ) {
-  const coffeesCol = collection(
-    db,
-    'sessions',
-    sessionId,
-    'coffees'
-  );
-
+  const coffeesCol = collection(db, 'sessions', sessionId, 'coffees');
   const q = query(coffeesCol, orderBy('order', 'asc'));
 
   return onSnapshot(q, (snap) => {
@@ -191,7 +201,7 @@ export function listenToCoffees(
 }
 
 /**
- * Cerrar sesión
+ * Cerrar sesión.
  */
 export async function closeSession(sessionId: string): Promise<void> {
   await assertCurrentUserIsSessionMaster(sessionId);
@@ -216,7 +226,7 @@ export async function closeSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Listener de sesión
+ * Listener de sesión.
  */
 export function listenToSession(
   sessionId: string,

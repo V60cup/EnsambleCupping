@@ -11,6 +11,7 @@ import {
 } from '../types/domain';
 
 import { listenToCoffeeProfiles } from '../services/scoreService';
+import { getFlavorDisplayName } from '../data/flavorLocalization';
 
 function roundTwo(value: number): number {
   return Math.round(value * 100) / 100;
@@ -39,9 +40,26 @@ function findRootCategory(
   return current;
 }
 
+function getAttributeDisplayName(
+  attributeId: string,
+  attributesById: Record<string, FlavorAttribute>
+): string {
+  const attribute = attributesById[attributeId];
+
+  if (!attribute) {
+    return attributeId;
+  }
+
+  return getFlavorDisplayName(attribute);
+}
+
 function averageBasicTastes(profiles: TasterProfile[]): BasicTasteRatings {
   if (profiles.length === 0) {
-    return { sweet: 0, sourAcidic: 0, bitter: 0 };
+    return {
+      sweet: 0,
+      sourAcidic: 0,
+      bitter: 0,
+    };
   }
 
   const totals = profiles.reduce(
@@ -50,7 +68,11 @@ function averageBasicTastes(profiles: TasterProfile[]): BasicTasteRatings {
       sourAcidic: acc.sourAcidic + profile.basicTastes.sourAcidic,
       bitter: acc.bitter + profile.basicTastes.bitter,
     }),
-    { sweet: 0, sourAcidic: 0, bitter: 0 }
+    {
+      sweet: 0,
+      sourAcidic: 0,
+      bitter: 0,
+    }
   );
 
   return {
@@ -98,14 +120,18 @@ function aggregate(
         uniqueDescriptorIdsForTaster.add(selection.attributeId);
       }
 
-      descriptorTally[selection.attributeId].intensitySum += selection.intensity;
+      descriptorTally[selection.attributeId].intensitySum +=
+        selection.intensity;
 
-      const rootCategory = findRootCategory(selection.attributeId, attributesById);
+      const rootCategory = findRootCategory(
+        selection.attributeId,
+        attributesById
+      );
 
       if (rootCategory) {
         if (!categoryTally[rootCategory.id]) {
           categoryTally[rootCategory.id] = {
-            name: rootCategory.name,
+            name: getFlavorDisplayName(rootCategory),
             count: 0,
             intensitySum: 0,
           };
@@ -124,7 +150,7 @@ function aggregate(
 
       return {
         attributeId,
-        name: attributesById[attributeId]?.name ?? attributeId,
+        name: getAttributeDisplayName(attributeId, attributesById),
         count: value.count,
         avgIntensity,
       };
@@ -141,9 +167,11 @@ function aggregate(
   const descriptorConsensus = Object.entries(descriptorTally)
     .map(([attributeId, value]) => ({
       attributeId,
-      name: attributesById[attributeId]?.name ?? attributeId,
+      name: getAttributeDisplayName(attributeId, attributesById),
       percentage:
-        profiles.length === 0 ? 0 : roundTwo((value.count / profiles.length) * 100),
+        profiles.length === 0
+          ? 0
+          : roundTwo((value.count / profiles.length) * 100),
     }))
     .sort((a, b) => b.percentage - a.percentage)
     .slice(0, 8);
@@ -153,7 +181,8 @@ function aggregate(
       categoryId,
       name: value.name,
       count: value.count,
-      avgIntensity: value.count === 0 ? 0 : roundTwo(value.intensitySum / value.count),
+      avgIntensity:
+        value.count === 0 ? 0 : roundTwo(value.intensitySum / value.count),
     }))
     .sort((a, b) => b.count - a.count);
 
@@ -161,8 +190,9 @@ function aggregate(
     profiles.length === 0
       ? 0
       : roundTwo(
-          profiles.reduce((sum, profile) => sum + profile.suitability, 0) /
-            profiles.length
+          profiles.reduce((sum, profile) => {
+            return sum + profile.suitability;
+          }, 0) / profiles.length
         );
 
   return {
@@ -191,7 +221,11 @@ export function useCoffeeDashboard(
       return;
     }
 
-    const unsubscribe = listenToCoffeeProfiles(sessionId, coffee.id, setProfiles);
+    const unsubscribe = listenToCoffeeProfiles(
+      sessionId,
+      coffee.id,
+      setProfiles
+    );
 
     return unsubscribe;
   }, [sessionId, coffee?.id]);
